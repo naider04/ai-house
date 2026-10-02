@@ -351,6 +351,18 @@ def build_tools():
                     "name": {"type": "string", "enum": opening_names},
                     "state": {"type": "string", "enum": ["open", "closed"]}},
                     "required": ["name", "state"]}}},
+            {"type": "function", "function": {
+                "name": "set_multiple_openings",
+                "description": (
+                    "Open or close several configured doors, windows, or other "
+                    "openings in one action. Use when the user requests multiple "
+                    f"openings together. Available names: {', '.join(opening_names)}."
+                ),
+                "parameters": {"type": "object", "properties": {
+                    "names": {"type": "array", "minItems": 2,
+                        "items": {"type": "string", "enum": opening_names}},
+                    "state": {"type": "string", "enum": ["open", "closed"]}},
+                    "required": ["names", "state"]}}},
         ])
 
     if any(s["pin"] == 32 and s["name"].lower() == "cradle" for s in servos):
@@ -443,20 +455,37 @@ def run_tool(name, args):
                 descriptions.append(f"{servo['name']}: {status}")
             return "Opening states: " + ("; ".join(descriptions) if descriptions else "none") + "."
 
-        if name == "set_opening":
-            wanted = str(args.get("name", "")).strip().lower()
+        if name in ("set_opening", "set_multiple_openings"):
+            raw_names = args.get("names", []) if name == "set_multiple_openings" else [args.get("name", "")]
+            if isinstance(raw_names, str):
+                raw_names = [raw_names]
+            if not isinstance(raw_names, list) or not raw_names:
+                return "Error: choose one or more configured openings."
             state_arg = str(args.get("state", "")).strip().lower()
             if state_arg not in ("open", "closed"):
                 return "Error: state must be open or closed."
             known = [s for s in read_servos() if is_opening(s) and effective_pair(s)]
-            match = next((s for s in known if s["name"].lower() == wanted), None)
-            if not match:
+            by_name = {s["name"].lower(): s for s in known}
+            chosen = []
+            for raw_name in raw_names:
+                match = by_name.get(str(raw_name).strip().lower())
+                if not match:
+                    names = ", ".join(s["name"] for s in known) or "none"
+                    return f"Error: unknown opening. Available openings: {names}."
+                if match not in chosen:
+                    chosen.append(match)
+            if name == "set_multiple_openings" and len(chosen) < 2:
+                return "Error: choose at least two different openings."
+            if not chosen:
                 names = ", ".join(s["name"] for s in known) or "none"
                 return f"Error: unknown opening. Available openings: {names}."
-            pair = effective_pair(match)
-            angle = int(pair[0] if state_arg == "open" else pair[1])
-            esp32_post(f"/api/servo/{match['pin']}", str(angle))
-            return f"Success: {match['name']} is {state_arg}."
+            for servo in chosen:
+                pair = effective_pair(servo)
+                angle = int(pair[0] if state_arg == "open" else pair[1])
+                esp32_post(f"/api/servo/{servo['pin']}", str(angle))
+            if len(chosen) == 1:
+                return f"Success: {chosen[0]['name']} is {state_arg}."
+            return f"Success: {', '.join(s['name'] for s in chosen)} are {state_arg}."
 
         if name == "soothe_baby":
             if not any(s["pin"] == 32 and s["name"].lower() == "cradle"
