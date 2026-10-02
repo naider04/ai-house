@@ -28,6 +28,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -58,32 +59,27 @@ MAX_HISTORY_MESSAGES = 8
 SYSTEM_PROMPT = """You are the voice assistant for a small Smart House prototype.
 
 Use the available high-level tools whenever the user asks to control a device.
-The server maps these actions to the hardware. Do not use GPIO pins, servo
-angles, motor pins, or movement-pattern settings; never invent hardware values.
 
-For doors, windows, and other open/close mechanisms, call set_opening with the
+For door, garage and window, call set_opening with the
 mechanism name and state "open" or "closed". For requests to put the baby to
 sleep, calm or soothe the baby, rock or move the baby, or related requests,
 call soothe_baby once. Its preset sequence stops automatically when complete.
 There is no stop action for the cradle.
 
-For lights, use turn_on_one_light for one requested light. Use
-turn_on_multiple_lights when the user explicitly asks for multiple lights or
+For lights, use turn_on_one_light for one requested color. Use
+turn_on_multiple_lights when the user explicitly asks for multiple
 colors. Use turn_off_lights to switch off named lights, or all lights when
-requested. The server applies the corresponding light-switching behavior. Use
+requested. Use
 get_lights to answer questions about light states. Use get_openings to answer
 questions about doors and windows.
 
 The fan is the only device with user-adjustable direction and speed. An
 unspecified turn-on direction means forward; an explicit direction takes
-precedence. The server maps these logical directions to the fan wiring. Turn
-off means stop. Speeds may be 0 to 100 percent; when none is specified, the
+precedence. Speeds may be 0 to 100 percent; when none is specified, the
 server uses its default.
 
 How to behave:
-- Be brief and natural. You are being read out loud, so one or two short
-  sentences is plenty. No markdown, no bullet lists, no emoji.
-- After a tool succeeds, briefly say what happened in plain words.
+- You are being read out loud, so no No markdown, no bullet lists, no emoji. you can even say just "done" if the instructions were clear and you are sure what you did was correct.
 - You may act on several devices in one turn if the user asks for it.
 - If a request is unclear, ask one short clarifying question.
 - If you cannot fulfil a request, say so in one sentence and do not guess."""
@@ -359,11 +355,11 @@ def build_tools():
             "description": (
                 "Control the fan direction and speed. An unspecified turn-on "
                 "direction defaults to forward. Speed is optional and ranges "
-                "from 0 to 100 percent; omitted speed uses the server default."
+                "from 50 to 100 percent; omitted speed uses the server default."
             ),
             "parameters": {"type": "object", "properties": {
                 "direction": {"type": "string", "enum": ["forward", "reverse", "stop"]},
-                "speed": {"type": "integer", "minimum": 0, "maximum": 100}},
+                "speed": {"type": "integer", "minimum": 50, "maximum": 100}},
                 "required": ["direction"]}}},
     ])
     return tools
@@ -467,13 +463,15 @@ def run_tool(name, args):
             # The fan motor wiring is reversed, so translate the logical
             # direction here and keep the model's interface intuitive.
             board_direction = {"forward": "reverse", "reverse": "forward", "stop": "stop"}[direction]
-            command = board_direction
-            if direction != "stop" and "speed" in args:
-                speed = args["speed"]
-                if not isinstance(speed, int) or not 0 <= speed <= 100:
-                    return "Error: fan speed must be a whole number from 0 to 100."
-                command += f" {speed}"
-            esp32_post("/api/motor/1", command)
+            if direction == "stop":
+                esp32_post("/api/motor/1", "stop")
+            else:
+                speed = args.get("speed", 70)
+                if not isinstance(speed, int) or isinstance(speed, bool) or not 50 <= speed <= 100:
+                    return "Error: fan speed must be a whole number from 50 to 100."
+                esp32_post("/api/motor/1", f"{board_direction} 100")
+                time.sleep(2)
+                esp32_post("/api/motor/1", f"{board_direction} {speed}")
             try:
                 fan = esp32_get("/api/state").get("motors", {}).get("1", {})
                 actual = fan.get("direction")
