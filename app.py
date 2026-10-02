@@ -51,6 +51,12 @@ def init_db():
             if not row:
                 db.execute("INSERT INTO users(username,password_hash,role,status) VALUES(?,?,?,?)",
                            (ADMIN_USERNAME, generate_password_hash(ADMIN_PASSWORD), "admin", "active"))
+            else:
+                # Render environment settings are the recovery path for the
+                # owner account. Updating ADMIN_PASSWORD and restarting the
+                # service replaces the stored password hash.
+                db.execute("UPDATE users SET password_hash=?,role='admin',status='active' WHERE username=?",
+                           (generate_password_hash(ADMIN_PASSWORD), ADMIN_USERNAME))
 
 
 init_db()
