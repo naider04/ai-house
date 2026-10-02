@@ -316,7 +316,8 @@ def run_chat(include_details):
         model_msg = (completion.get("choices") or [{}])[0].get("message") or {}
         calls = model_msg.get("tool_calls") or []
         if not calls:
-            result = {"reply": (model_msg.get("content") or "Done.").strip()}
+            result = {"reply": (model_msg.get("content") or "Done.").strip(),
+                      "tool_call_count": len(actions)}
             if include_details:
                 result.update({"actions": actions, "model": used_model})
             return jsonify(result)
@@ -330,7 +331,8 @@ def run_chat(include_details):
             result = core.run_tool(fn.get("name", ""), args)
             actions.append({"tool": fn.get("name", ""), "args": args, "result": result})
             messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": result})
-    result = {"reply": "I completed the requested device actions."}
+    result = {"reply": "I completed the requested device actions.",
+              "tool_call_count": len(actions)}
     if include_details:
         result.update({"actions": actions, "model": used_model})
     return jsonify(result)
