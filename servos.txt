@@ -1,10 +1,17 @@
 # Smart House servo pattern - the single source of truth for servos.
 #
-# One servo per line. Two forms:
+# One servo per line. Two or three forms:
 #
 #   name: gpio N                       a free 0-180 degree slider
 #   name: gpio N, open A, close B      slider plus saved Open and Close buttons
+#   name: gpio N, open A, close B, rocker   the angles are rocking limits,
+#                                           not open and close
 #
+# ", rocker" is for anything that rocks or waves instead of opening. Its two
+# angles stay on the page as limits, but the assistant is told the servo cannot
+# be opened or closed, so it never offers an Open or Close for it. Only the
+# keyword "rocker" is accepted; anything else is a typo and stops the build.
+
 # The name shows on the web page and on the voice page. Rename them to
 # whatever the mechanism actually does, for example:
 #
@@ -29,5 +36,5 @@
 
 puerta de garage: gpio 19, open 95, close 0
 window: gpio 33, open 63, close 166
-cradle: gpio 32, open 60, close 120
-servo 4: gpio 18
+cradle: gpio 32, open 60, close 120, rocker
+kitchen door: gpio 18, open 106, close 11
