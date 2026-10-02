@@ -90,6 +90,19 @@ How to behave:
 - If you cannot fulfil a request, say so in one sentence and do not guess."""
 
 
+def is_global_shutdown_request(text):
+    """Recognize clear whole-house shutdown commands for deterministic handling."""
+    normalized = str(text).casefold()
+    scope = re.search(
+        r"\b(everything|all of it|all devices|all appliances|the whole house|"
+        r"the entire house|todo|todos|todas|toda la casa)\b", normalized)
+    action = re.search(
+        r"\b(close|shut|turn off|switch off|power off|turn everything off|"
+        r"switch everything off|apaga|apagar|cierra|cerrar)\b", normalized)
+    conflicting_on = re.search(r"\b(turn on|switch on|power on|enciende|prende)\b", normalized)
+    return bool(scope and action and not conflicting_on)
+
+
 def load_env(path):
     """Read KEY=VALUE lines. Existing environment variables win."""
     values = {}
@@ -301,6 +314,14 @@ def build_tools():
 
     tools = [
         {"type": "function", "function": {
+            "name": "shut_down_house",
+            "description": (
+                "Close all configured doors and windows, turn off every light, "
+                "and stop the fan. Use for a whole-house request to close or "
+                "turn off everything. This action is handled together by the server."
+            ),
+            "parameters": {"type": "object", "properties": {}}}},
+        {"type": "function", "function": {
             "name": "get_lights",
             "description": "Read the on/off state of the configured lights by name.",
             "parameters": {"type": "object", "properties": {}}}},
@@ -397,6 +418,30 @@ def build_tools():
 def run_tool(name, args):
     """Run one high-level appliance action; hardware values stay private."""
     try:
+        if name == "shut_down_house":
+            global LAST_TRAVEL
+            LAST_TRAVEL = servo_travel_from_board()
+            operations = [("all lights off", lambda: esp32_post("/api/all", "off"))]
+            for servo in read_servos():
+                if not is_opening(servo):
+                    continue
+                pair = effective_pair(servo)
+                if pair is not None:
+                    operations.append((f"close {servo['name']}", lambda s=servo, p=pair:
+                                       esp32_post(f"/api/servo/{s['pin']}", str(int(p[1])))))
+            operations.append(("fan stopped", lambda: esp32_post("/api/motor/1", "stop")))
+            failures = []
+            completed = []
+            for label, operation in operations:
+                try:
+                    operation()
+                    completed.append(label)
+                except Exception as exc:  # continue so one failed device cannot skip the rest
+                    failures.append(f"{label}: {exc}")
+            if failures:
+                return "Partial result. Completed " + ", ".join(completed) + ". Failed: " + "; ".join(failures)
+            return "Success: all configured openings closed, all lights off, and fan stopped."
+
         if name == "get_lights":
             state = esp32_get("/api/state")
             lights = []
@@ -699,6 +744,10 @@ def chat():
 
     if not text:
         return jsonify({"error": "empty message"}), 400
+
+    if is_global_shutdown_request(text):
+        result = run_tool("shut_down_house", {})
+        return jsonify({"reply": result, "actions": [{"tool": "shut_down_house", "args": {}, "result": result}], "model": None})
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
