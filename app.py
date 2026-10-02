@@ -300,6 +300,13 @@ def run_chat(include_details):
     message = str(data.get("message", "")).strip()[:500]
     if not message:
         return jsonify({"error": "Write or say a message first."}), 400
+    if core.is_global_shutdown_request(message):
+        outcome = core.run_tool("shut_down_house", {})
+        result = {"reply": outcome, "tool_call_count": 1}
+        if include_details:
+            result.update({"actions": [{"tool": "shut_down_house", "args": {}, "result": outcome}],
+                           "model": None})
+        return jsonify(result)
     messages = [{"role": "system", "content": core.SYSTEM_PROMPT}]
     for turn in (data.get("history") or [])[-core.MAX_HISTORY_MESSAGES:]:
         if isinstance(turn, dict) and turn.get("role") in ("user", "assistant"):
