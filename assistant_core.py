@@ -64,19 +64,21 @@ angles, motor pins, or movement-pattern settings; never invent hardware values.
 For doors, windows, and other open/close mechanisms, call set_opening with the
 mechanism name and state "open" or "closed". For requests to put the baby to
 sleep, calm or soothe the baby, rock or move the baby, or related requests,
-call set_cradle once with action "soothe". To stop the cradle, call set_cradle
-with action "stop". The server handles the cradle's movement pattern.
+call soothe_baby once. Its preset sequence stops automatically when complete.
+There is no stop action for the cradle.
 
-For lights, call set_lights with the requested light name(s) and state. The
-server handles the user's preference to keep one light color on at a time.
-Keep multiple colors on only when the user explicitly requests a combination
-or all lights. Use get_lights to answer questions about light states. Use
-get_openings to answer questions about doors and windows.
+For lights, use turn_on_one_light for one requested light. Use
+turn_on_multiple_lights when the user explicitly asks for multiple lights or
+colors. Use turn_off_lights to switch off named lights, or all lights when
+requested. The server applies the corresponding light-switching behavior. Use
+get_lights to answer questions about light states. Use get_openings to answer
+questions about doors and windows.
 
 The fan is the only device with user-adjustable direction and speed. An
-unspecified turn-on direction means reverse; an explicit direction takes
-precedence. Turn off means stop. Speeds may be 0 to 100 percent; when none is
-specified, the server uses its default.
+unspecified turn-on direction means forward; an explicit direction takes
+precedence. The server maps these logical directions to the fan wiring. Turn
+off means stop. Speeds may be 0 to 100 percent; when none is specified, the
+server uses its default.
 
 How to behave:
 - Be brief and natural. You are being read out loud, so one or two short
@@ -290,19 +292,33 @@ def build_tools():
             "description": "Read the on/off state of the configured lights by name.",
             "parameters": {"type": "object", "properties": {}}}},
         {"type": "function", "function": {
-            "name": "set_lights",
+            "name": "turn_on_one_light",
             "description": (
-                "Turn named lights on or off. Use one name for one light or "
-                "several names when the user explicitly requests multiple colors. "
-                "Use the name all only when the user asks for all lights. "
-                "The server applies the one-color-at-a-time preference automatically. "
+                "Turn on exactly one requested light and turn off every other light. "
                 f"Available names: {', '.join(led_names)}."
+            ),
+            "parameters": {"type": "object", "properties": {
+                "name": {"type": "string", "enum": led_names}},
+                "required": ["name"]}}},
+        {"type": "function", "function": {
+            "name": "turn_on_multiple_lights",
+            "description": (
+                "Turn on the requested combination of lights and turn off every "
+                "other light. Use only when the user explicitly requests multiple "
+                f"lights/colors, or all lights. Available names: {', '.join(led_names)}."
             ),
             "parameters": {"type": "object", "properties": {
                 "names": {"type": "array", "minItems": 1,
                     "items": {"type": "string", "enum": ["all"] + led_names}},
-                "state": {"type": "string", "enum": ["on", "off"]}},
-                "required": ["names", "state"]}}},
+                "all": {"type": "boolean", "description": "Set true only when the user asks for all lights."}},
+                "required": ["names"]}}},
+        {"type": "function", "function": {
+            "name": "turn_off_lights",
+            "description": "Turn off the requested lights, or all lights when requested.",
+            "parameters": {"type": "object", "properties": {
+                "names": {"type": "array", "minItems": 1,
+                    "items": {"type": "string", "enum": ["all"] + led_names}},
+                }, "required": ["names"]}}},
     ]
 
     if openings:
@@ -326,15 +342,12 @@ def build_tools():
 
     if any(s["pin"] == 32 and s["name"].lower() == "cradle" for s in servos):
         tools.append({"type": "function", "function": {
-            "name": "set_cradle",
+            "name": "soothe_baby",
             "description": (
-                "Start the configured soothing movement when the user asks to "
-                "calm, soothe, rock, move, or put the baby to sleep. Stop it only "
-                "when the user asks to stop. The server runs the preset movement."
+                "Run the configured seven-cycle cradle movement when the user asks "
+                "to calm, soothe, rock, move, or put the baby to sleep. It stops by itself."
             ),
-            "parameters": {"type": "object", "properties": {
-                "action": {"type": "string", "enum": ["soothe", "stop"]}},
-                "required": ["action"]}}})
+            "parameters": {"type": "object", "properties": {}}}})
 
     tools.extend([
         {"type": "function", "function": {
@@ -345,7 +358,7 @@ def build_tools():
             "name": "set_fan",
             "description": (
                 "Control the fan direction and speed. An unspecified turn-on "
-                "direction defaults to reverse. Speed is optional and ranges "
+                "direction defaults to forward. Speed is optional and ranges "
                 "from 0 to 100 percent; omitted speed uses the server default."
             ),
             "parameters": {"type": "object", "properties": {
@@ -367,11 +380,13 @@ def run_tool(name, args):
                 lights.append(f"{led['name']}: {'on' if on else 'off'}")
             return "Light states: " + ("; ".join(lights) if lights else "none configured") + "."
 
-        if name == "set_lights":
-            state_arg = str(args.get("state", "")).strip().lower()
-            if state_arg not in ("on", "off"):
-                return "Error: state must be on or off."
-            names = args.get("names", [])
+        if name in ("turn_on_one_light", "turn_on_multiple_lights", "turn_off_lights"):
+            if name == "turn_on_one_light":
+                names = [args.get("name", "")]
+                state_arg = "on"
+            else:
+                names = args.get("names", [])
+                state_arg = "off" if name == "turn_off_lights" else "on"
             if isinstance(names, str):
                 names = [names]
             if not isinstance(names, list) or not names:
@@ -392,11 +407,9 @@ def run_tool(name, args):
                 if led not in chosen:
                     chosen.append(led)
             if state_arg == "on":
-                live = esp32_get("/api/state").get("leds", {})
-                wanted_colors = {led.get("color") or f"unique:{led['pin']}" for led in chosen}
+                chosen_pins = {led["pin"] for led in chosen}
                 for led in available:
-                    color = led.get("color") or f"unique:{led['pin']}"
-                    if color not in wanted_colors and live.get(str(led["pin"]), False):
+                    if led["pin"] not in chosen_pins:
                         esp32_post(f"/api/led/{led['pin']}", "off")
             for led in chosen:
                 esp32_post(f"/api/led/{led['pin']}", state_arg)
@@ -432,27 +445,29 @@ def run_tool(name, args):
             esp32_post(f"/api/servo/{match['pin']}", str(angle))
             return f"Success: {match['name']} is {state_arg}."
 
-        if name == "set_cradle":
-            action = str(args.get("action", "")).strip().lower()
-            if action not in ("soothe", "stop"):
-                return "Error: action must be soothe or stop."
+        if name == "soothe_baby":
             if not any(s["pin"] == 32 and s["name"].lower() == "cradle"
                        for s in read_servos()):
                 return "Error: the cradle is not configured."
-            command = "stop" if action == "stop" else "start 17 310 7 90"
-            esp32_post("/api/servo/32/wave", command)
-            return "Success: cradle movement stopped." if action == "stop" else "Success: cradle soothing movement started."
+            esp32_post("/api/servo/32/wave", "start 17 310 7 90")
+            return "Success: cradle soothing sequence started and will stop after seven cycles."
 
         if name == "get_fan":
             state = esp32_get("/api/state")
             fan = state.get("motors", {}).get("1", {})
-            return f"Fan is {fan.get('direction', 'unknown')} at {fan.get('speed', 'unknown')} percent."
+            direction = fan.get("direction", "unknown")
+            if direction in ("forward", "reverse"):
+                direction = "reverse" if direction == "forward" else "forward"
+            return f"Fan is {direction} at {fan.get('speed', 'unknown')} percent."
 
         if name == "set_fan":
             direction = str(args.get("direction", "")).strip().lower()
             if direction not in ("forward", "reverse", "stop"):
                 return "Error: direction must be forward, reverse, or stop."
-            command = direction
+            # The fan motor wiring is reversed, so translate the logical
+            # direction here and keep the model's interface intuitive.
+            board_direction = {"forward": "reverse", "reverse": "forward", "stop": "stop"}[direction]
+            command = board_direction
             if direction != "stop" and "speed" in args:
                 speed = args["speed"]
                 if not isinstance(speed, int) or not 0 <= speed <= 100:
@@ -461,7 +476,10 @@ def run_tool(name, args):
             esp32_post("/api/motor/1", command)
             try:
                 fan = esp32_get("/api/state").get("motors", {}).get("1", {})
-                return f"Success: fan is {fan.get('direction')} at {fan.get('speed')} percent."
+                actual = fan.get("direction")
+                if actual in ("forward", "reverse"):
+                    actual = "reverse" if actual == "forward" else "forward"
+                return f"Success: fan is {actual} at {fan.get('speed')} percent."
             except Exception:
                 return "Success: fan command sent."
 
