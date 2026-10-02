@@ -1,0 +1,33 @@
+# Smart House servo pattern - the single source of truth for servos.
+#
+# One servo per line. Two forms:
+#
+#   name: gpio N                       a free 0-180 degree slider
+#   name: gpio N, open A, close B      slider plus saved Open and Close buttons
+#
+# The name shows on the web page and on the voice page. Rename them to
+# whatever the mechanism actually does, for example:
+#
+#   door: gpio 19, open 95, close 0
+#   window: gpio 33, open 0, close 110
+#
+# With open/close the page gets a slider and two presets, and the servo boots
+# parked at the close angle. Leave open/close off for anything that needs a
+# free 0-180 degree slider. The cradle on GPIO32 also gets wave controls.
+#
+# The open/close angles are only the starting point: the page has a box for
+# each of them, and a pair you save there is kept by the ESP32 itself, so it
+# survives a power cut and the voice assistant uses it too. Edit this file
+# again only to change what a fresh flash starts from.
+#
+# A servo needs three wires:
+#   signal -> the GPIO below
+#   power  -> an external 5V supply, NOT the ESP32 5V pin
+#   ground -> shared with the ESP32 ground, or the servo will not move
+#
+# Blank lines and lines starting with # are ignored.
+
+puerta de garage: gpio 19, open 95, close 0
+window: gpio 33, open 63, close 166
+cradle: gpio 32, open 60, close 120
+servo 4: gpio 18
