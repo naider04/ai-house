@@ -57,35 +57,33 @@ MAX_HISTORY_MESSAGES = 8
 # simple motor controls. Tool descriptions provide the configured device list.
 SYSTEM_PROMPT = """You are the voice assistant for a small Smart House prototype.
 
-You control the configured LEDs, servos, and motors on an ESP32 microcontroller.
-Use the available tools whenever the user asks to operate one of those devices.
-The configured tools list the devices and supported actions. For the fan, an
-unspecified "turn on" direction means run it in reverse; an
-explicit direction from the user takes precedence. "Turn off" means stop it.
-When a speed is requested, allow any value from 0 to 100 percent. The firmware
-briefly starts at reverse 90 percent, then applies the requested direction and
-speed. When the user
-asks to put the baby to sleep, calm or soothe the baby, rock or move the baby,
-or makes a related request, call wave_servo with command=start, amplitude=17,
-wait_ms=310, repetitions=7, and center=90. Use these exact values each time.
-When the user asks to stop rocking or moving the baby, call wave_servo with
-command=stop.
+Use the available high-level tools whenever the user asks to control a device.
+The server maps these actions to the hardware. Do not use GPIO pins, servo
+angles, motor pins, or movement-pattern settings; never invent hardware values.
 
-Lighting preference: the user usually wants only one light color on at a time.
-Before turning on a named light or color, call get_leds. Turn off active LEDs
-of other colors, then turn on the requested LED(s); LEDs of the same configured
-color may remain on together. Keep multiple colors on only when the user
-explicitly asks for multiple colors, a combination, or all lights. When only
-asked to turn a light off, do not change the other lights.
+For doors, windows, and other open/close mechanisms, call set_opening with the
+mechanism name and state "open" or "closed". For requests to put the baby to
+sleep, calm or soothe the baby, rock or move the baby, or related requests,
+call set_cradle once with action "soothe". To stop the cradle, call set_cradle
+with action "stop". The server handles the cradle's movement pattern.
+
+For lights, call set_lights with the requested light name(s) and state. The
+server handles the user's preference to keep one light color on at a time.
+Keep multiple colors on only when the user explicitly requests a combination
+or all lights. Use get_lights to answer questions about light states. Use
+get_openings to answer questions about doors and windows.
+
+The fan is the only device with user-adjustable direction and speed. An
+unspecified turn-on direction means reverse; an explicit direction takes
+precedence. Turn off means stop. Speeds may be 0 to 100 percent; when none is
+specified, the server uses its default.
 
 How to behave:
 - Be brief and natural. You are being read out loud, so one or two short
   sentences is plenty. No markdown, no bullet lists, no emoji.
 - After a tool succeeds, briefly say what happened in plain words.
 - You may act on several devices in one turn if the user asks for it.
-- If the user asks which devices exist, use the available tool descriptions.
 - If a request is unclear, ask one short clarifying question.
-- Never invent pin numbers. Only use the pins listed in your tools.
 - If you cannot fulfil a request, say so in one sentence and do not guess."""
 
 
@@ -194,6 +192,8 @@ def read_leds():
     can follow the user's one-colour-at-a-time lighting preference.
     """
     cfg = HERE / "leds.txt"
+    if not cfg.exists():
+        cfg = HERE.parent / "leds.txt"
     leds = []
     for raw in cfg.read_text().splitlines():
         line = raw.split("#", 1)[0].strip()
@@ -212,6 +212,8 @@ def read_servos():
     what makes a servo a plain open/close mechanism like a door or a window.
     """
     cfg = HERE / "servos.txt"
+    if not cfg.exists():
+        cfg = HERE.parent / "servos.txt"
     servos = []
     for raw in cfg.read_text().splitlines():
         line = raw.split("#", 1)[0].strip()
@@ -273,312 +275,201 @@ def servo_state(servo, angle, travel=None):
 
 
 def build_tools():
+    """Offer only appliance-level actions; keep hardware values server-side."""
     leds = read_leds()
     servos = read_servos()
     global LAST_TRAVEL
     LAST_TRAVEL = servo_travel_from_board()
-    led_enum = ", ".join(
-        f"{l['name']} ({l['color']}, GPIO{l['pin']})" if l.get("color")
-        else f"{l['name']} (GPIO{l['pin']})" for l in leds)
-    servo_enum = ", ".join(f"{s['name']} (GPIO{s['pin']}){servo_travel(s)}"
-                           for s in servos)
-
-    # A worked example, built from the angles in force right now, because the
-    # page can change them and a stale example would teach the model a wrong
-    # number.
-    servo_example = ""
-    for s in servos:
-        pair = effective_pair(s, LAST_TRAVEL)
-        if pair:
-            servo_example = (f" For example: {{'{s['name']}': {pair[1]}}} to close, "
-                             f"{{'{s['name']}': {pair[0]}}} to open")
-            break
+    openings = [s for s in servos if effective_pair(s, LAST_TRAVEL)]
+    led_names = [l["name"] for l in leds]
+    opening_names = [s["name"] for s in openings]
 
     tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": "set_led",
-                "description": (
-                    "Turn one LED on or off. "
-                    f"Available LEDs: {led_enum}."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "name": {
-                            "type": "string",
-                            "description": "LED name, for example 'red' or 'blue 2'.",
-                        },
-                        "state": {
-                            "type": "string",
-                            "enum": ["on", "off"],
-                            "description": "Whether to switch it on or off.",
-                        },
-                    },
-                    "required": ["name", "state"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "set_all_leds",
-                "description": "Turn every LED on, or every LED off.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "state": {
-                            "type": "string",
-                            "enum": ["on", "off"],
-                            "description": "Whether to switch them all on or all off.",
-                        },
-                    },
-                    "required": ["state"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_leds",
-                "description": "Read which LEDs are currently on or off.",
-                "parameters": {"type": "object", "properties": {}},
-            },
-        },
+        {"type": "function", "function": {
+            "name": "get_lights",
+            "description": "Read the on/off state of the configured lights by name.",
+            "parameters": {"type": "object", "properties": {}}}},
+        {"type": "function", "function": {
+            "name": "set_lights",
+            "description": (
+                "Turn named lights on or off. Use one name for one light or "
+                "several names when the user explicitly requests multiple colors. "
+                "Use the name all only when the user asks for all lights. "
+                "The server applies the one-color-at-a-time preference automatically. "
+                f"Available names: {', '.join(led_names)}."
+            ),
+            "parameters": {"type": "object", "properties": {
+                "names": {"type": "array", "minItems": 1,
+                    "items": {"type": "string", "enum": ["all"] + led_names}},
+                "state": {"type": "string", "enum": ["on", "off"]}},
+                "required": ["names", "state"]}}},
     ]
 
-    # Add servo tools if servos exist
-    if servos:
-        tools.append({
-            "type": "function",
-            "function": {
-                "name": "set_servo",
+    if openings:
+        tools.extend([
+            {"type": "function", "function": {
+                "name": "get_openings",
+                "description": "Read whether the configured doors and windows are open or closed.",
+                "parameters": {"type": "object", "properties": {}}}},
+            {"type": "function", "function": {
+                "name": "set_opening",
                 "description": (
-                    "Set one servo to an angle in degrees. "
-                    f"Available servos: {servo_enum}. "
-                    "A servo listed with an open and a close angle only has those "
-                    "two positions, so use those exact angles."
-                    f"{servo_example}"
+                    "Open or close a configured door, window, or other opening. "
+                    "Choose its name and the state open or closed; the server "
+                    f"handles the mechanism. Available names: {', '.join(opening_names)}."
                 ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "name": {
-                            "type": "string",
-                            "description": "Servo name, for example 'puerta de garage' or 'window'.",
-                        },
-                        "angle": {
-                            "type": "number",
-                            "description": "Angle in degrees, from 0 to 180.",
-                        },
-                    },
-                    "required": ["name", "angle"],
-                },
-            },
-        })
-        tools.append({
-            "type": "function",
-            "function": {
-                "name": "get_servos",
-                "description": "Read which servos are currently positioned where.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                },
-            },
-        })
+                "parameters": {"type": "object", "properties": {
+                    "name": {"type": "string", "enum": opening_names},
+                    "state": {"type": "string", "enum": ["open", "closed"]}},
+                    "required": ["name", "state"]}}},
+        ])
 
-        if any(servo["pin"] == 32 for servo in servos):
-            tools.append({
-                "type": "function",
-                "function": {
-                    "name": "wave_servo",
-                    "description": (
-                        "Start or stop the cradle servo on GPIO32. For baby soothing/rocking requests, "
-                        "starting always uses the fixed pattern: amplitude 17 degrees, wait 310 ms, "
-                        "7 repetitions, center 90 degrees."
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "command": {"type": "string", "enum": ["start", "stop"]},
-                        },
-                        "required": ["command"],
-                    },
-                },
-            })
+    if any(s["pin"] == 32 and s["name"].lower() == "cradle" for s in servos):
+        tools.append({"type": "function", "function": {
+            "name": "set_cradle",
+            "description": (
+                "Start the configured soothing movement when the user asks to "
+                "calm, soothe, rock, move, or put the baby to sleep. Stop it only "
+                "when the user asks to stop. The server runs the preset movement."
+            ),
+            "parameters": {"type": "object", "properties": {
+                "action": {"type": "string", "enum": ["soothe", "stop"]}},
+                "required": ["action"]}}})
 
-
-        tools.append({
-            "type": "function",
-            "function": {
-                "name": "get_motors",
-                "description": "Read the current state of motors/fan (direction and speed).",
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                },
-            },
-        })
-        tools.append({
-            "type": "function",
-            "function": {
-                "name": "set_motor",
-                "description": (
-                    "Control the fan. An unspecified turn-on direction means reverse; use stop to turn it off. "
-                    "When starting, the firmware gives a brief reverse 90% kick then applies this target speed. "
-                    "Available motors: fan (GPIO21 ENB, GPIO22 IN3, GPIO23 IN4). "
-                    "Speed range is 0-100%%. Default speed when starting without a number is 70%%. "
-                    "Valid commands include 'forward', 'reverse', 'stop', optionally followed by a speed "
-                    "(e.g. 'forward 50', 'reverse 90', 'stop')."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "name": {
-                            "type": "string",
-                            "description": "Motor name, e.g. 'fan'.",
-                        },
-                        "command": {
-                            "type": "string",
-                            "description": (
-                                "Command string like 'forward', 'forward 50', 'reverse 90', 'stop'."
-                            ),
-                        },
-                    },
-                    "required": ["name", "command"],
-                },
-            },
-        })
-
+    tools.extend([
+        {"type": "function", "function": {
+            "name": "get_fan",
+            "description": "Read the fan's current direction and speed percentage.",
+            "parameters": {"type": "object", "properties": {}}}},
+        {"type": "function", "function": {
+            "name": "set_fan",
+            "description": (
+                "Control the fan direction and speed. An unspecified turn-on "
+                "direction defaults to reverse. Speed is optional and ranges "
+                "from 0 to 100 percent; omitted speed uses the server default."
+            ),
+            "parameters": {"type": "object", "properties": {
+                "direction": {"type": "string", "enum": ["forward", "reverse", "stop"]},
+                "speed": {"type": "integer", "minimum": 0, "maximum": 100}},
+                "required": ["direction"]}}},
+    ])
     return tools
 
 
 def run_tool(name, args):
-    """Execute one tool call against the ESP32. Returns a string for the model."""
+    """Run one high-level appliance action; hardware values stay private."""
     try:
-        if name == "get_leds":
+        if name == "get_lights":
             state = esp32_get("/api/state")
-            on = [str(pin) for pin, v in state.get("leds", {}).items() if v]
-            off = [str(pin) for pin, v in state.get("leds", {}).items() if not v]
-            return f"LEDs on (GPIO): {', '.join(on) if on else 'none'}. " \
-                   f"LEDs off (GPIO): {', '.join(off) if off else 'none'}."
-
-        if name == "set_all_leds":
-            state_arg = str(args.get("state", "")).lower()
-            if state_arg not in ("on", "off"):
-                return "Error: state must be 'on' or 'off'."
-            esp32_post("/api/all", state_arg)
-            return f"Success: all LEDs are now {state_arg}."
-
-        if name == "set_led":
-            wanted = str(args.get("name", "")).strip().lower()
-            state_arg = str(args.get("state", "")).lower()
-            if state_arg not in ("on", "off"):
-                return "Error: state must be 'on' or 'off'."
-
-            match = None
+            lights = []
             for led in read_leds():
-                if led["name"].lower() == wanted:
-                    match = led
-                    break
-            if match is None:
-                names = ", ".join(l["name"] for l in read_leds())
-                return f"Error: no LED named '{wanted}'. Available: {names}."
+                on = bool(state.get("leds", {}).get(str(led["pin"]), False))
+                lights.append(f"{led['name']}: {'on' if on else 'off'}")
+            return "Light states: " + ("; ".join(lights) if lights else "none configured") + "."
 
-            esp32_post(f"/api/led/{match['pin']}", state_arg)
-            return f"Success: {match['name']} (GPIO{match['pin']}) is now {state_arg}."
+        if name == "set_lights":
+            state_arg = str(args.get("state", "")).strip().lower()
+            if state_arg not in ("on", "off"):
+                return "Error: state must be on or off."
+            names = args.get("names", [])
+            if isinstance(names, str):
+                names = [names]
+            if not isinstance(names, list) or not names:
+                return "Error: choose one or more configured light names."
+            if any(str(n).strip().lower() == "all" for n in names):
+                if len(names) != 1:
+                    return "Error: use all by itself."
+                esp32_post("/api/all", state_arg)
+                return f"Success: all lights are now {state_arg}."
+            available = read_leds()
+            by_name = {led["name"].lower(): led for led in available}
+            chosen = []
+            for raw_name in names:
+                led = by_name.get(str(raw_name).strip().lower())
+                if led is None:
+                    return "Error: unavailable light name. Available lights: " + ", ".join(
+                        led["name"] for led in available) + "."
+                if led not in chosen:
+                    chosen.append(led)
+            if state_arg == "on":
+                live = esp32_get("/api/state").get("leds", {})
+                wanted_colors = {led.get("color") or f"unique:{led['pin']}" for led in chosen}
+                for led in available:
+                    color = led.get("color") or f"unique:{led['pin']}"
+                    if color not in wanted_colors and live.get(str(led["pin"]), False):
+                        esp32_post(f"/api/led/{led['pin']}", "off")
+            for led in chosen:
+                esp32_post(f"/api/led/{led['pin']}", state_arg)
+            return f"Success: {', '.join(led['name'] for led in chosen)} {state_arg}."
 
-        if name == "get_servos":
+        if name == "get_openings":
             state = esp32_get("/api/state")
-            servos_state = state.get("servos", {})
-            # The reply already carries the live angles, so trust those over
-            # whatever servos.txt says.
             live = state.get("servoTravel") or {}
-            servo_descs = []
+            positions = state.get("servos", {})
+            descriptions = []
             for servo in read_servos():
-                pin = servo['pin']
-                angle = servos_state.get(str(pin), "unknown")
-                servo_descs.append(f"{servo['name']} (GPIO{pin}): "
-                                   f"{servo_state(servo, angle, live)}")
-            return f"Servos: {', '.join(servo_descs) if servo_descs else 'none'}"
+                pair = effective_pair(servo, live)
+                if not pair:
+                    continue
+                position = positions.get(str(servo["pin"]))
+                status = "open" if position == pair[0] else (
+                    "closed" if position == pair[1] else "in between")
+                descriptions.append(f"{servo['name']}: {status}")
+            return "Opening states: " + ("; ".join(descriptions) if descriptions else "none") + "."
 
-        if name == "wave_servo":
-            command = str(args.get("command", "start")).strip().lower()
-            if command not in ("start", "stop"):
-                return "Error: command must be 'start' or 'stop'."
-            if not any(servo["pin"] == 32 for servo in read_servos()):
-                return "Error: no cradle servo is configured on GPIO32."
-            if command == "stop":
-                esp32_post("/api/servo/32/wave", "stop")
-                return "Success: cradle stopped."
-            amplitude, wait_ms, repetitions, center = 17, 310, 7, 90
-            body = f"start {amplitude} {wait_ms} {repetitions} {center}"
-            esp32_post("/api/servo/32/wave", body)
-            return (f"Success: cradle started with {amplitude} degrees each side of {center}, "
-                    f"changing sides every {wait_ms} ms for "
-                    f"{'continuously' if repetitions == 0 else str(repetitions) + ' cycles'}.")
-
-        if name == "set_servo":
+        if name == "set_opening":
             wanted = str(args.get("name", "")).strip().lower()
-            angle_arg = args.get("angle")
-            if not isinstance(angle_arg, (int, float)) or not (0 <= angle_arg <= 180):
-                return "Error: angle must be a number between 0 and 180."
-            
-            match = None
-            for servo in read_servos():
-                if servo["name"].lower() == wanted:
-                    match = servo
-                    break
-            if match is None:
-                names = ", ".join(s["name"] for s in read_servos())
-                return f"Error: no servo named '{wanted}'. Available: {names}."
-            
-            esp32_post(f"/api/servo/{match['pin']}", str(int(angle_arg)))
-            return (f"Success: {match['name']} (GPIO{match['pin']}) is now at "
-                    f"{servo_state(match, int(angle_arg))}.")
+            state_arg = str(args.get("state", "")).strip().lower()
+            if state_arg not in ("open", "closed"):
+                return "Error: state must be open or closed."
+            match = next((s for s in read_servos()
+                          if s["name"].lower() == wanted and effective_pair(s)), None)
+            if not match:
+                names = ", ".join(s["name"] for s in read_servos() if effective_pair(s)) or "none"
+                return f"Error: unknown opening. Available openings: {names}."
+            pair = effective_pair(match)
+            angle = int(pair[0] if state_arg == "open" else pair[1])
+            esp32_post(f"/api/servo/{match['pin']}", str(angle))
+            return f"Success: {match['name']} is {state_arg}."
 
+        if name == "set_cradle":
+            action = str(args.get("action", "")).strip().lower()
+            if action not in ("soothe", "stop"):
+                return "Error: action must be soothe or stop."
+            if not any(s["pin"] == 32 and s["name"].lower() == "cradle"
+                       for s in read_servos()):
+                return "Error: the cradle is not configured."
+            command = "stop" if action == "stop" else "start 17 310 7 90"
+            esp32_post("/api/servo/32/wave", command)
+            return "Success: cradle movement stopped." if action == "stop" else "Success: cradle soothing movement started."
 
-        if name == "get_motors":
+        if name == "get_fan":
             state = esp32_get("/api/state")
-            motors = state.get("motors", {})
-            descs = []
-            for mid, m in motors.items():
-                descs.append(f"motor {mid}: {m.get('direction')} {m.get('speed')}%")
-            return f"Motors: {', '.join(descs) if descs else 'none'}."
+            fan = state.get("motors", {}).get("1", {})
+            return f"Fan is {fan.get('direction', 'unknown')} at {fan.get('speed', 'unknown')} percent."
 
-        if name == "set_motor":
-            wanted = str(args.get("name", "")).strip().lower()
-            cmd = str(args.get("command", "")).strip()
-            if not cmd:
-                return "Error: command must be provided (e.g. 'forward 90' or 'stop')."
-            simple_command = re.sub(r"\s+", " ", cmd.lower())
-            if simple_command in ("on", "turn on", "start", "switch on"):
-                cmd = "reverse"
-            elif simple_command in ("off", "turn off", "stop", "switch off"):
-                cmd = "stop"
-            # find motor match by name
-            match_id = None
-            # only one motor 'fan' maps to id 1
-            if wanted in ("fan", "motor 1", "motor1"):
-                match_id = 1
-            if match_id is None:
-                return f"Error: no motor named '{wanted}'. Available: fan."
-            esp32_post(f"/api/motor/{match_id}", cmd)
-            # return updated state snippet
+        if name == "set_fan":
+            direction = str(args.get("direction", "")).strip().lower()
+            if direction not in ("forward", "reverse", "stop"):
+                return "Error: direction must be forward, reverse, or stop."
+            command = direction
+            if direction != "stop" and "speed" in args:
+                speed = args["speed"]
+                if not isinstance(speed, int) or not 0 <= speed <= 100:
+                    return "Error: fan speed must be a whole number from 0 to 100."
+                command += f" {speed}"
+            esp32_post("/api/motor/1", command)
             try:
-                st = esp32_get("/api/state")
-                m = st.get("motors", {}).get(str(match_id), {})
-                return f"Success: fan set to {m.get('direction')} at {m.get('speed')}%."
+                fan = esp32_get("/api/state").get("motors", {}).get("1", {})
+                return f"Success: fan is {fan.get('direction')} at {fan.get('speed')} percent."
             except Exception:
-                return "Success."
+                return "Success: fan command sent."
 
-        return f"Error: unknown tool '{name}'."
+        return f"Error: unknown action '{name}'."
     except urllib.error.URLError as exc:
-        return f"Error: cannot reach the ESP32 at {ESP32_URL} ({exc.reason})."
-    except Exception as exc:  # noqa: BLE001 - report anything back to the model
-        return f"Error while running '{name}': {exc}"
+        return f"Error: cannot reach the ESP32 ({exc.reason})."
+    except Exception as exc:  # noqa: BLE001
+        return f"Error while controlling the device: {exc}"
 
 
 # --- the OpenRouter call --------------------------------------------------
