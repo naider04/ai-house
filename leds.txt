@@ -1,0 +1,24 @@
+# Smart House LED pattern - the single source of truth.
+#
+# One LED per line:  name: gpio N
+# Any order, any names. Run ./generate.sh to rebuild the firmware and the page.
+#
+# The colour comes from the name, so "red" or "red 2" is a red LED. A name that
+# says where the light is cannot, so put the colour after the pin:
+#
+#   outside light: gpio 13, red
+#   bedroom light: gpio 16, blue
+#
+# Blank lines and lines starting with # are ignored.
+#
+# Rebuild everything with:
+#   python3 generate.py --upload     generate, compile and flash
+#   python3 generate.py --compile    generate and compile only
+#   python3 generate.py --check      validate this file and exit
+
+outdoor lights: gpio 13, red
+kitchen light: gpio 4, yellow
+bedroom light: gpio 16, blue
+green lights: gpio 14, green
+blue lights: gpio 17, blue
+red lights: gpio 27, red
