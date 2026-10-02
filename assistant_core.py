@@ -52,6 +52,10 @@ SERVO_RE = re.compile(
     re.I)
 
 ROCKER = "rocker"
+COLOR_OPTION_RE = re.compile(
+    r"\b(red|orange|yellow|green|blue|indigo|violet|purple|pink|cyan|magenta|white)\b",
+    re.I,
+)
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -220,6 +224,15 @@ def read_leds():
                          "color": (m.group(3) or "").lower()})
     return leds
 
+
+def is_color_option(led):
+    """Color exclusivity applies to lights named as color choices.
+
+    The configured bulb hue is separate: e.g. 'kitchen light, yellow' is still
+    a room light and must not switch off other room/outdoor lights.
+    """
+    return bool(COLOR_OPTION_RE.search(led["name"]))
+
 def read_servos():
     """Return the servo list straight out of servos.txt, so the tools always
     match the firmware instead of drifting out of sync.
@@ -328,8 +341,8 @@ def build_tools():
         {"type": "function", "function": {
             "name": "turn_on_one_light",
             "description": (
-                "Turn on one requested light. If it is a configured color light, "
-                "turn off the other configured color lights; leave non-color lights alone. "
+                "Turn on one requested light. If its name is a color choice, turn off "
+                "the other color-named lights; leave location lights alone. "
                 f"Available names: {', '.join(led_names)}."
             ),
             "parameters": {"type": "object", "properties": {
@@ -338,8 +351,8 @@ def build_tools():
         {"type": "function", "function": {
             "name": "turn_on_multiple_lights",
             "description": (
-                "Turn on the requested lights. If color lights are selected, turn off "
-                "other configured color lights while leaving non-color lights alone. "
+                "Turn on the requested lights. If color-named lights are selected, "
+                "turn off other color-named lights while leaving location lights alone. "
                 "Use only when the user explicitly requests multiple "
                 f"lights/colors, or all lights. Available names: {', '.join(led_names)}."
             ),
@@ -479,10 +492,10 @@ def run_tool(name, args):
                 if led not in chosen:
                     chosen.append(led)
             if state_arg == "on":
-                chosen_color_pins = {led["pin"] for led in chosen if led.get("color")}
+                chosen_color_pins = {led["pin"] for led in chosen if is_color_option(led)}
                 if chosen_color_pins:
                     for led in available:
-                        if led.get("color") and led["pin"] not in chosen_color_pins:
+                        if is_color_option(led) and led["pin"] not in chosen_color_pins:
                             esp32_post(f"/api/led/{led['pin']}", "off")
             for led in chosen:
                 esp32_post(f"/api/led/{led['pin']}", state_arg)
