@@ -1,0 +1,1287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart House</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 16px;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #14161a; color: #e8eaed; padding: 24px;
+  }
+  h1 { font-size: 1.35rem; font-weight: 600; margin: 0; }
+  .grid {
+    width: 100%; max-width: 340px; display: flex; flex-direction: column; gap: 10px;
+  }
+  .led {
+    display: flex; align-items: center; gap: 13px; width: 100%;
+    background: #1e2126; border: 1px solid #2c3038; border-radius: 12px;
+    padding: 14px 16px; cursor: pointer; color: #f5c518; font: inherit; text-align: left;
+  }
+  .led:disabled { opacity: .55; cursor: not-allowed; }
+  .led:active { transform: translateY(1px); }
+  .led.on { border-color: #4a515c; }
+  .dot {
+    width: 15px; height: 15px; border-radius: 50%; flex: 0 0 auto;
+    background: #33383f; transition: background .15s ease, box-shadow .15s ease;
+  }
+  .led.on .dot { background: currentColor; box-shadow: 0 0 10px 1px currentColor; }
+  .name { flex: 1; font-size: .96rem; }
+  .pin { font-size: .74rem; color: #8b929c; font-variant-numeric: tabular-nums; }
+  .state { font-size: .74rem; color: #8b929c; min-width: 24px; text-align: right; }
+  .led.on .state { color: #e8eaed; }
+  .row { display: flex; gap: 10px; width: 100%; max-width: 340px; }
+  button.act {
+    flex: 1; padding: 14px 10px; font: inherit; font-weight: 600; font-size: .9rem;
+    color: #e8eaed; background: #2a2f37; border: 1px solid #3a404a;
+    border-radius: 12px; cursor: pointer;
+  }
+  button.act:disabled { opacity: .55; cursor: not-allowed; }
+  button.act:active { transform: translateY(1px); }
+  #status { font-size: .82rem; color: #8b929c; min-height: 1.1em; text-align: center; }
+  #status.err { color: #e06c6c; }
+
+  .voice {
+    width: 100%; max-width: 340px; margin-top: 4px;
+    background: #1e2126; border: 1px solid #2c3038; border-radius: 14px;
+    padding: 16px; display: flex; flex-direction: column; gap: 12px;
+  }
+  .mic {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    width: 100%; padding: 14px; font: inherit; font-weight: 600; font-size: .95rem;
+    color: #e8eaed; background: #2a2f37; border: 1px solid #3a404a;
+    border-radius: 12px; cursor: pointer;
+  }
+  .mic:disabled { opacity: .55; cursor: not-allowed; }
+  .mic.listening { background: #7a2222; border-color: #a03333; }
+  .mic svg { width: 17px; height: 17px; flex: 0 0 auto; }
+  .heard { font-size: .88rem; color: #8b929c; min-height: 1.2em; font-style: italic; }
+  .reply { font-size: .9rem; color: #e8eaed; min-height: 1.2em; }
+  .bridge { font-size: .72rem; color: #6b717a; }
+
+  details.manual { width: 100%; max-width: 340px; font-size: .8rem; color: #8b929c; }
+  details.manual summary { cursor: pointer; }
+  details.manual textarea {
+    width: 100%; margin-top: 8px; padding: 10px; font: inherit; font-size: .84rem;
+    color: #e8eaed; background: #1e2126; border: 1px solid #2c3038; border-radius: 10px;
+    resize: vertical; min-height: 62px;
+  }
+  details.manual .row { margin-top: 8px; }
+
+  details.log { width: 100%; max-width: 340px; font-size: .8rem; color: #8b929c; }
+  details.log summary { cursor: pointer; display: flex; align-items: center; gap: 8px; }
+  details.log .clear {
+    margin-left: auto; font: inherit; font-size: .72rem; color: #8b929c;
+    background: #2a2f37; border: 1px solid #3a404a; border-radius: 8px;
+    padding: 3px 9px; cursor: pointer;
+  }
+  details.log .clear:hover { color: #e8eaed; }
+  #log {
+    margin-top: 10px; max-height: 260px; overflow-y: auto;
+    background: #14171b; border: 1px solid #262a31; border-radius: 10px;
+    padding: 10px; display: flex; flex-direction: column; gap: 9px;
+  }
+  #log:empty::after {
+    content: 'No tool calls yet.'; color: #5b6169; font-size: .76rem; font-style: italic;
+  }
+  .log-turn { border-left: 2px solid #2c3038; padding-left: 9px; }
+  .log-turn.err { border-left-color: #a04848; }
+  .log-you { font-size: .74rem; color: #6b717a; margin-bottom: 4px; }
+  .log-you b { color: #9aa1aa; font-weight: 600; }
+  .log-call {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .72rem; line-height: 1.5; color: #9aa1aa;
+  }
+  .log-call .fn { color: #7fb3e8; font-weight: 600; }
+  .log-call .arg { color: #c8a86a; }
+  .log-call .res { color: #6f9c6f; }
+  .log-call.bad .res { color: #d07a7a; }
+  .log-model { font-size: .68rem; color: #5b6169; margin-top: 4px; }
+  .log-none { font-size: .72rem; color: #5b6169; font-style: italic; }
+
+  /* Servo controls */
+  .servos { display: grid; gap: 10px; margin: 18px 0; }
+  .servos-title { font-size: .78rem; text-transform: uppercase; letter-spacing: .09em;
+                  color: #7d848d; margin: 0 0 2px; }
+  .servo { background: #171a1f; border: 1px solid #262b32; border-radius: 12px;
+           padding: 12px 14px 14px; }
+  .servo-head { display: flex; align-items: baseline; justify-content: space-between;
+                gap: 10px; margin-bottom: 9px; }
+  .servo-name { font-weight: 600; font-size: .98rem; }
+  .servo-pin { font-size: .7rem; color: #6b7280; font-family: ui-monospace, Menlo, monospace; }
+  .servo-readout { font-size: 1.5rem; font-weight: 700; color: #7cc4ff;
+                   font-variant-numeric: tabular-nums; line-height: 1; }
+  .servo-readout .deg { font-size: .8rem; color: #6b7280; font-weight: 400; margin-left: 2px; }
+  .servo input[type=range] { width: 100%; margin: 4px 0 8px; accent-color: #7cc4ff; }
+  .servo-presets { display: flex; gap: 6px; }
+  .servo-presets button { flex: 1; background: #1e2229; color: #b9c0c9;
+                          border: 1px solid #2b313a; border-radius: 8px;
+                          padding: 5px 0; font-size: .74rem; cursor: pointer; }
+  .servo-presets button:hover { background: #262c34; color: #fff; }
+  .servo-presets button:disabled { opacity: .5; cursor: not-allowed; }
+  .servo-presets button.active { background: #14304a; border-color: #7cc4ff; color: #cfe8ff; }
+  .servo-state { display: block; font-size: .72rem; font-weight: 400; color: #7cc4ff;
+                 letter-spacing: .04em; margin-top: 3px; }
+  /* Retuning the two angles of a door or a window */
+  .servo-range { display: flex; align-items: center; gap: 8px; margin: 9px 0 8px; }
+  .servo-range label { display: flex; align-items: center; gap: 5px;
+                       font-size: .74rem; color: #6b7280; }
+  .servo-range input {
+    width: 56px; padding: 5px 7px; font: inherit; font-size: .82rem;
+    color: #e8eaed; background: #1e2229; border: 1px solid #2b313a; border-radius: 7px;
+  }
+  .servo-range input:disabled { opacity: .5; }
+  .servo-range input:focus { outline: none; border-color: #7cc4ff; }
+  .servo-range button {
+    margin-left: auto; padding: 6px 12px; font: inherit; font-size: .74rem;
+    color: #b9c0c9; background: #1e2229; border: 1px solid #2b313a;
+    border-radius: 8px; cursor: pointer;
+  }
+  .servo-range button:hover:not(:disabled) { background: #262c34; color: #fff; }
+  .servo-range button:disabled { opacity: .5; cursor: not-allowed; }
+  .servo-wave { display: flex; flex-wrap: wrap; align-items: end; gap: 7px; margin-top: 10px; }
+  .servo-wave label { display: grid; gap: 4px; color: #8b929c; font-size: .68rem; }
+  .servo-wave input { width: 74px; padding: 6px 7px; color: #e8eaed;
+    background: #1e2229; border: 1px solid #343a44; border-radius: 7px; }
+  .servo-wave button { padding: 7px 10px; color: #cfe8ff; background: #14304a;
+    border: 1px solid #31516d; border-radius: 8px; cursor: pointer; }
+  .servo-wave button:disabled { opacity: .5; cursor: not-allowed; }
+  .servo-wave-status { color: #7cc4ff; font-size: .72rem; }
+  .servo-note { font-size: .7rem; color: #6b7280; margin: 8px 0 0; }
+
+  /* Motor controls */
+  .motor { background: #171a1f; border: 1px solid #262b32; border-radius: 12px;
+           padding: 12px 14px 14px; }
+  .motor .servo-head { margin-bottom: 9px; }
+  .motor input[type=range] { width: 100%; margin: 4px 0 8px; accent-color: #ff9f43; }
+  .motor-readout { font-size: 1.5rem; font-weight: 700; color: #ff9f43;
+                   font-variant-numeric: tabular-nums; line-height: 1; }
+  .motor-readout .pct { font-size: .8rem; color: #6b7280; font-weight: 400; margin-left: 2px; }
+  .motor-buttons { display: flex; gap: 6px; }
+  .motor-buttons button { flex: 1; background: #1e2229; color: #b9c0c9;
+                          border: 1px solid #2b313a; border-radius: 8px;
+                          padding: 7px 0; font-size: .76rem; cursor: pointer; }
+  .motor-buttons button:hover:not(:disabled) { background: #262c34; color: #fff; }
+  .motor-buttons button.running { background: #3a2a12; border-color: #ff9f43; color: #ffcf8f; }
+  .motor-buttons button.stop.running { background: #3a1c1c; border-color: #e5484d; color: #ffb4b6; }
+  .motor-buttons button:disabled { opacity: .5; cursor: not-allowed; }
+</style>
+</head>
+<body>
+  <h1>Smart House</h1>
+
+  <div class="voice">
+    <button class="mic" id="mic" type="button">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3z"/>
+        <path d="M18 11a1 1 0 1 0-2 0 4 4 0 0 1-8 0 1 1 0 1 0-2 0 6 6 0 0 0 5 5.9V19H9a1 1 0 1 0 0 2h6a1 1 0 1 0 0-2h-2v-2.1A6 6 0 0 0 18 11z"/>
+      </svg>
+      <span id="mic-label">Talk to the assistant</span>
+    </button>
+    <div class="heard" id="heard"></div>
+    <div class="reply" id="reply"></div>
+    <div class="bridge" id="bridge-note"></div>
+  </div>
+
+  <details class="log" id="log-box">
+    <summary>
+      Tool call log
+      <button class="clear" id="log-clear" type="button">clear</button>
+    </summary>
+    <div id="log"></div>
+  </details>
+
+  <div class="grid" id="leds"></div>
+
+  <div class="servos" id="servos"></div>
+
+  <div class="servos" id="motors"></div>
+
+  <details class="manual">
+    <summary>Type instead of speaking</summary>
+    <textarea id="typed" placeholder="e.g. turn on the red light"></textarea>
+    <div class="row">
+      <button class="act" id="send-typed" type="button">Send</button>
+    </div>
+  </details>
+
+  <div class="row">
+    <button class="act" id="all-on">All on</button>
+    <button class="act" id="all-off">All off</button>
+  </div>
+
+  <div id="status">Connecting...</div>
+
+<script>
+// Generated by ESP32/generate.py from leds.txt - do not edit by hand.
+// The ESP32 serves this page itself, so same-origin calls work. To open the
+// file straight from disk instead, set this to the ESP32 address, e.g.
+// const API = "http://192.168.1.61";
+const API = "";
+
+const LEDS = [
+  { pin: 13, name: 'outdoor lights', color: '#e5484d' },
+  { pin: 4, name: 'kitchen light', color: '#f5c518' },
+  { pin: 16, name: 'bedroom light', color: '#4a9eff' },
+  { pin: 14, name: 'green lights', color: '#3ddc84' },
+  { pin: 17, name: 'blue lights', color: '#4a9eff' },
+  { pin: 27, name: 'red lights', color: '#e5484d' }
+];
+const SERVOS = [
+  { pin: 19, name: 'puerta de garage', open: 95, close: 0 },
+  { pin: 33, name: 'window', open: 63, close: 166 },
+  { pin: 32, name: 'cradle', open: 60, close: 120 },
+  { pin: 18, name: 'servo 4', open: null, close: null }
+];
+const MOTORS = [
+  { id: 1, name: 'fan', ena: 21 }
+];
+
+const ledsBox = document.getElementById('leds');
+const servosBox = document.getElementById('servos');
+const motorsBox = document.getElementById('motors');
+const allOnBtn = document.getElementById('all-on');
+const allOffBtn = document.getElementById('all-off');
+const status = document.getElementById('status');
+const buttons = {};
+const servoUI = {};
+const motorUI = {};
+// pin -> {open, close}, as last reported by the board. Seeded from the file
+// baked into this page, so it still works on a board that is too old to
+// report its angles.
+const travel = {};
+let travelWarned = false;
+const waveUI = {};
+let wavePollTimer = null;
+let wavePollBusy = false;
+
+function servoEntryFor(pin) {
+  return SERVOS.find(s => s.pin === pin);
+}
+
+// The angles in force right now: what the board says, else what was compiled in.
+function travelFor(pin) {
+  if (travel[pin]) return travel[pin];
+  const hit = servoEntryFor(pin);
+  return (hit && hit.open !== null) ? { open: hit.open, close: hit.close } : null;
+}
+
+function say(msg, isError) {
+  status.textContent = msg;
+  status.classList.toggle('err', !!isError);
+}
+
+function paint(pin, on) {
+  const btn = buttons[pin];
+  if (!btn) return;
+  btn.classList.toggle('on', on);
+  btn.setAttribute('aria-pressed', String(on));
+  btn.querySelector('.state').textContent = on ? 'on' : 'off';
+}
+
+function setBusy(busy) {
+  Object.values(buttons).forEach(b => b.disabled = busy);
+  allOnBtn.disabled = busy;
+  allOffBtn.disabled = busy;
+  Object.values(servoUI).forEach(s => {
+    if (s.slider) s.slider.disabled = busy;
+    if (s.openInput) {
+      s.openInput.disabled = busy;
+      s.closeInput.disabled = busy;
+      s.save.disabled = busy;
+    }
+    s.presets.forEach(b => b.disabled = busy);
+  });
+  Object.values(waveUI).forEach(w => {
+    Object.values(w.inputs).forEach(input => input.disabled = busy);
+    w.start.disabled = busy;
+    w.stop.disabled = busy;
+  });
+  Object.values(motorUI).forEach(m => {
+    m.slider.disabled = busy;
+    Object.values(m.buttons).forEach(b => b.disabled = busy);
+  });
+}
+
+function buildRow(led) {
+  const btn = document.createElement('button');
+  btn.className = 'led';
+  btn.type = 'button';
+  btn.setAttribute('aria-pressed', 'false');
+  btn.style.color = led.color;
+  btn.innerHTML =
+    '<span class="dot"></span>' +
+    '<span class="name">' + led.name + '</span>' +
+    '<span class="pin">GPIO' + led.pin + '</span>' +
+    '<span class="state">off</span>';
+  btn.addEventListener('click', () => {
+    sendLed(led.pin, !btn.classList.contains('on'));
+  });
+  ledsBox.appendChild(btn);
+  buttons[led.pin] = btn;
+}
+
+function nameFor(pin) {
+  const hit = LEDS.find(l => l.pin === pin);
+  return hit ? hit.name : 'GPIO' + pin;
+}
+
+function applyState(state) {
+  Object.keys(state.leds).forEach(pin => paint(Number(pin), state.leds[pin]));
+  Object.keys(state.servos || {}).forEach(pin => paintServo(Number(pin), state.servos[pin]));
+  Object.keys(state.motors || {}).forEach(id => paintMotor(Number(id), state.motors[id]));
+  applyTravel(state.servoTravel);
+  Object.keys(state.wave || {}).forEach(pin => paintWave(Number(pin), state.wave[pin]));
+}
+
+// Picks up the saved open/close angles and puts them in the boxes. A field the
+// user is still typing in is left alone, so a reply cannot wipe a half typed
+// number.
+function applyTravel(overrides) {
+  if (!overrides) {
+    // The board answered but sent no angles at all, so it was flashed before
+    // this feature existed. Say so, instead of letting every save fail with a
+    // bare 404.
+    if (!travelWarned && SERVOS.some(s => s.open !== null)) {
+      travelWarned = true;
+      const warn = document.createElement('p');
+      warn.className = 'servo-note';
+      warn.textContent = 'This ESP32 is running older firmware, so these angles '
+        + 'are the ones it was built with. Flash it again to change them.';
+      servosBox.appendChild(warn);
+    }
+    return;
+  }
+  Object.keys(overrides).forEach(key => {
+    const pin = Number(key);
+    travel[pin] = overrides[key];
+    const ui = servoUI[pin];
+    if (ui && ui.openInput) {
+      if (document.activeElement !== ui.openInput) ui.openInput.value = overrides[key].open;
+      if (document.activeElement !== ui.closeInput) ui.closeInput.value = overrides[key].close;
+      Object.keys(ui.buttons).forEach(word => {
+        ui.buttons[word].textContent = word + ' ' + overrides[key][word] + '°';
+      });
+    }
+    // The button labels and the active highlight follow the new angles.
+    if (ui && ui.angle !== undefined) paintServo(pin, ui.angle);
+  });
+}
+
+async function post(path, body) {
+  const res = await fetch(API + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: body
+  });
+  if (!res.ok) {
+    // The board says what it did not like in its JSON error, so show that
+    // instead of a bare status code. The status is kept on the error for the
+    // cases that need it.
+    let detail = '';
+    try {
+      const data = await res.json();
+      detail = (data && data.error) ? data.error : '';
+    } catch (err) {
+      // Not JSON, so the status is all there is to go on.
+    }
+    const error = new Error(detail || ('ESP32 replied ' + res.status));
+    error.status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+async function sendLed(pin, on) {
+  setBusy(true);
+  say('Sending...');
+  try {
+    const state = await post('/api/led/' + pin, on ? 'on' : 'off');
+    applyState(state);
+    say(nameFor(pin) + ' is ' + (on ? 'on' : 'off'));
+    logManual('set_led', { name: nameFor(pin), state: on ? 'on' : 'off' },
+      'Success: ' + nameFor(pin) + ' (GPIO' + pin + ') is now ' + (on ? 'on' : 'off') + '.');
+  } catch (err) {
+    say(err.message, true);
+    logManual('set_led', { name: nameFor(pin), state: on ? 'on' : 'off' }, null, err.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function sendAll(on) {
+  setBusy(true);
+  say('Sending...');
+  try {
+    const state = await post('/api/all', on ? 'on' : 'off');
+    applyState(state);
+    say('All LEDs are ' + (on ? 'on' : 'off'));
+    logManual('set_all_leds', { state: on ? 'on' : 'off' },
+      'Success: all LEDs are now ' + (on ? 'on' : 'off') + '.');
+  } catch (err) {
+    say(err.message, true);
+    logManual('set_all_leds', { state: on ? 'on' : 'off' }, null, err.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function servoNameFor(pin) {
+  const hit = SERVOS.find(s => s.pin === pin);
+  return hit ? hit.name : 'GPIO' + pin;
+}
+
+// 'open' or 'close' when the servo is sitting at one of its two angles, '' for
+// a free servo or one parked somewhere in between.
+function servoPosition(pin, angle) {
+  const pair = travelFor(pin);
+  if (!pair) return '';
+  if (angle === pair.open) return 'open';
+  if (angle === pair.close) return 'close';
+  return '';
+}
+
+// The same thing in words, for the line under the angle.
+function servoWordFor(pin, angle) {
+  const pair = travelFor(pin);
+  if (!pair) return '';
+  const at = servoPosition(pin, angle);
+  if (at === 'close') return 'closed';
+  return at === 'open' ? 'open' : 'part way';
+}
+
+// Updates the angle shown next to the slider. Called while dragging too, so
+// the number follows the knob without waiting for the ESP32.
+function paintServo(pin, angle) {
+  const ui = servoUI[pin];
+  if (!ui) return;
+  ui.angle = Number(angle);
+  ui.readout.textContent = ui.angle;
+  if (ui.slider && document.activeElement !== ui.slider) ui.slider.value = ui.angle;
+  if (!ui.state) return;
+  const pair = travelFor(pin);
+  const at = servoPosition(pin, ui.angle);
+  ui.state.textContent = servoWordFor(pin, ui.angle);
+  // Light up the button the servo is actually sitting at, so the page still
+  // tells the truth if it was moved from the knob or from the voice.
+  Object.keys(ui.buttons).forEach(key => {
+    const here = key === at;
+    ui.buttons[key].classList.toggle('active', here);
+    ui.buttons[key].setAttribute('aria-pressed', String(here));
+    ui.buttons[key].textContent = key + ' ' + pair[key] + '°';
+  });
+}
+
+function buildServo(servo) {
+  const box = document.createElement('div');
+  box.className = 'servo';
+
+  const head = document.createElement('div');
+  head.className = 'servo-head';
+  const left = document.createElement('div');
+  const name = document.createElement('div');
+  name.className = 'servo-name';
+  name.textContent = servo.name;
+  const pin = document.createElement('div');
+  pin.className = 'servo-pin';
+  pin.textContent = 'GPIO' + servo.pin;
+  left.appendChild(name);
+  left.appendChild(pin);
+  const readout = document.createElement('div');
+  readout.className = 'servo-readout';
+  const num = document.createElement('span');
+  num.textContent = servo.open === null ? '90' : String(servo.close);
+  const deg = document.createElement('span');
+  deg.className = 'deg';
+  deg.textContent = '°';
+  readout.appendChild(num);
+  readout.appendChild(deg);
+
+  // A servo with open and close angles is a door or a window: it gets those
+  // two words under the angle plus the same live angle slider as any servo.
+  let state = null;
+  if (servo.open !== null) {
+    state = document.createElement('div');
+    state.className = 'servo-state';
+    readout.appendChild(state);
+  }
+
+  head.appendChild(left);
+  head.appendChild(readout);
+
+  const ui = { slider: null, readout: num, state: state, presets: [], buttons: {} };
+  servoUI[servo.pin] = ui;
+
+  const actions = document.createElement('div');
+  actions.className = 'servo-presets';
+
+  const slider = document.createElement('input');
+  slider.type = 'range';
+  slider.min = '0';
+  slider.max = '180';
+  slider.step = '1';
+  slider.value = num.textContent;
+  slider.setAttribute('aria-label', servo.name + ' angle in degrees');
+  ui.slider = slider;
+
+  // Update the readout while dragging, then move the servo once on release.
+  slider.addEventListener('input', () => {
+    num.textContent = slider.value;
+  });
+  slider.addEventListener('change', () => sendServo(servo.pin, Number(slider.value)));
+
+  if (servo.open === null) {
+    [0, 90, 180].forEach(value => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = value + '°';
+      b.addEventListener('click', () => {
+        slider.value = String(value);
+        num.textContent = String(value);
+        sendServo(servo.pin, value);
+      });
+      ui.presets.push(b);
+      actions.appendChild(b);
+    });
+
+    box.appendChild(head);
+    box.appendChild(slider);
+    box.appendChild(actions);
+  } else {
+    // Two boxes to retune the travel, then the two buttons that use it.
+    const range = document.createElement('div');
+    range.className = 'servo-range';
+    const inputs = {};
+    [['open', servo.open], ['close', servo.close]].forEach(pair => {
+      const label = document.createElement('label');
+      label.textContent = pair[0];
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.min = '0';
+      input.max = '180';
+      input.step = '1';
+      input.value = String(pair[1]);
+      input.setAttribute('aria-label', servo.name + ' ' + pair[0] + ' angle in degrees');
+      label.appendChild(input);
+      inputs[pair[0]] = input;
+      range.appendChild(label);
+    });
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.textContent = 'save';
+    save.addEventListener('click', () => saveServoTravel(servo.pin));
+    range.appendChild(save);
+    ui.openInput = inputs.open;
+    ui.closeInput = inputs.close;
+    ui.save = save;
+
+    [['open', 'open'], ['close', 'close']].forEach(pair => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      // The angle is read when the button is pressed, not here, so a retune
+      // is picked up without rebuilding the card.
+      b.textContent = pair[0] + ' ' + travelFor(servo.pin)[pair[1]] + '°';
+      b.setAttribute('aria-pressed', 'false');
+      b.addEventListener('click', () => {
+        const pair2 = travelFor(servo.pin);
+        if (pair2) sendServo(servo.pin, pair2[pair[1]], pair[0]);
+      });
+      ui.buttons[pair[0]] = b;
+      ui.presets.push(b);
+      actions.appendChild(b);
+    });
+
+    // Enter saves, so the boxes work without reaching for the button.
+    [ui.openInput, ui.closeInput].forEach(input => {
+      input.addEventListener('keydown', ev => {
+        if (ev.key === 'Enter') saveServoTravel(servo.pin);
+      });
+    });
+
+    box.appendChild(head);
+    box.appendChild(slider);
+    box.appendChild(range);
+    box.appendChild(actions);
+  }
+
+  if (servo.pin === 32) buildWaveControls(box, servo);
+
+  servosBox.appendChild(box);
+}
+
+function buildWaveControls(box, servo) {
+  const panel = document.createElement('div');
+  panel.className = 'servo-wave';
+  const inputs = {};
+  [
+    ['amplitude', '17', '1', '60'],
+    ['waitMs', '310', '50', '2000'],
+    ['repetitions', '7', '0', '1000'],
+    ['center', '90', '0', '180']
+  ].forEach(([key, value, min, max]) => {
+    const label = document.createElement('label');
+    label.textContent = key === 'waitMs' ? 'wait (ms)' :
+      (key === 'repetitions' ? 'reps (0 = continuous)' : key);
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = min;
+    input.max = max;
+    input.step = '1';
+    input.value = value;
+    input.setAttribute('aria-label', servo.name + ' wave ' + key);
+    inputs[key] = input;
+    label.appendChild(input);
+    panel.appendChild(label);
+  });
+  const start = document.createElement('button');
+  start.type = 'button';
+  start.textContent = 'Start rocking';
+  const stop = document.createElement('button');
+  stop.type = 'button';
+  stop.textContent = 'Stop';
+  const status = document.createElement('span');
+  status.className = 'servo-wave-status';
+  panel.appendChild(start);
+  panel.appendChild(stop);
+  panel.appendChild(status);
+  waveUI[servo.pin] = { inputs: inputs, start: start, stop: stop, status: status };
+  start.addEventListener('click', () => sendWave(servo.pin, false));
+  stop.addEventListener('click', () => sendWave(servo.pin, true));
+  box.appendChild(panel);
+}
+
+function paintWave(pin, data) {
+  const ui = waveUI[pin];
+  if (!ui) return;
+  ui.status.dataset.active = String(!!data.active);
+  ui.status.textContent = data.active
+    ? 'Rocking · ' + data.completed + (data.repetitions ? ' / ' + data.repetitions : ' cycles')
+    : 'Stopped';
+  const active = Object.values(waveUI).some(w => w.status.dataset.active === 'true');
+  if (active && wavePollTimer === null) {
+    wavePollTimer = setInterval(async () => {
+      if (wavePollBusy) return;
+      wavePollBusy = true;
+      try {
+        const response = await fetch(API + '/api/state');
+        if (response.ok) applyState(await response.json());
+      } catch (_) {
+        // Keep the current display if a brief state poll fails.
+      } finally {
+        wavePollBusy = false;
+      }
+    }, 500);
+  } else if (!active && wavePollTimer !== null) {
+    clearInterval(wavePollTimer);
+    wavePollTimer = null;
+  }
+}
+
+async function sendWave(pin, stop) {
+  const ui = waveUI[pin];
+  let body = 'stop';
+  if (!stop) {
+    const values = Object.fromEntries(Object.entries(ui.inputs).map(([key, input]) => [key, Number(input.value)]));
+    const { amplitude, waitMs, repetitions, center } = values;
+    if (!Number.isInteger(amplitude) || amplitude < 1 || amplitude > 60
+        || !Number.isInteger(waitMs) || waitMs < 50 || waitMs > 2000
+        || !Number.isInteger(repetitions) || repetitions < 0 || repetitions > 1000
+        || !Number.isInteger(center) || center < amplitude || center + amplitude > 180) {
+      say('Wave settings need amplitude 1–60°, wait 50–2000 ms, reps 0–1000, and center ± amplitude within 0–180°.', true);
+      return;
+    }
+    body = 'start ' + amplitude + ' ' + waitMs + ' ' + repetitions + ' ' + center;
+  }
+  setBusy(true);
+  say(stop ? 'Stopping wave...' : 'Starting wave...');
+  try {
+    const state = await post('/api/servo/' + pin + '/wave', body);
+    applyState(state);
+    say(stop ? 'Cradle stopped.' : 'Cradle started.');
+  } catch (err) {
+    say(err.message, true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+// `direction` is forward, reverse or stop. `speed` is remembered while the
+// motor is stopped, so the knob stays where the user left it.
+function paintMotor(id, data) {
+  const ui = motorUI[id];
+  if (!ui) return;
+  const dir = data.direction || 'stopped';
+  const speed = typeof data.speed === 'number' ? data.speed : 0;
+  const selectedSpeed = dir === 'stopped' && speed === 0 ? 70 : speed;
+  if (document.activeElement !== ui.slider) ui.slider.value = String(selectedSpeed);
+  ui.readout.textContent = String(selectedSpeed);
+  ui.buttons.forward.classList.toggle('running', dir === 'forward');
+  ui.buttons.reverse.classList.toggle('running', dir === 'reverse');
+  ui.buttons.stop.classList.toggle('running', dir === 'stopped' || dir === 'stop');
+  ui.speed = selectedSpeed;
+  ui.direction = dir;
+}
+
+function motorNameFor(id) {
+  const hit = MOTORS.find(m => m.id === id);
+  return hit ? hit.name : 'motor ' + id;
+}
+
+async function sendMotor(id, direction, speed) {
+  const ui = motorUI[id];
+  const want = (typeof speed === 'number') ? speed : (ui ? ui.speed : 0);
+  setBusy(true);
+  say('Sending...');
+  try {
+    const state = await post('/api/motor/' + id, direction + ' ' + want);
+    applyState(state);
+    const name = motorNameFor(id);
+    const label = direction === 'stop'
+      ? name + ' stopped'
+      : name + ' going ' + direction + ' at ' + state.motors[id].speed + '%';
+    say(label);
+    logManual('set_motor',
+      { name: name, direction: direction, speed: state.motors[id].speed },
+      'Success: ' + label + '.');
+  } catch (err) {
+    say(err.message, true);
+    logManual('set_motor',
+      { name: motorNameFor(id), direction: direction, speed: want }, null, err.message);
+    if (ui) paintMotor(id, { direction: ui.direction || 'stopped', speed: ui.speed || 0 });
+  } finally {
+    setBusy(false);
+  }
+}
+
+function buildMotor(motor) {
+  const box = document.createElement('div');
+  box.className = 'motor';
+
+  const head = document.createElement('div');
+  head.className = 'servo-head';
+  const left = document.createElement('div');
+  const name = document.createElement('div');
+  name.className = 'servo-name';
+  name.textContent = motor.name;
+  const pin = document.createElement('div');
+  pin.className = 'servo-pin';
+  pin.textContent = 'ENA GPIO' + motor.ena + ' · L298N';
+  left.appendChild(name);
+  left.appendChild(pin);
+  const readout = document.createElement('div');
+  readout.className = 'motor-readout';
+  const num = document.createElement('span');
+  num.textContent = '70';
+  const pct = document.createElement('span');
+  pct.className = 'pct';
+  pct.textContent = '%';
+  readout.appendChild(num);
+  readout.appendChild(pct);
+  head.appendChild(left);
+  head.appendChild(readout);
+
+  const slider = document.createElement('input');
+  slider.type = 'range';
+  slider.min = '0';
+  slider.max = '100';
+  slider.step = '1';
+  slider.value = '70';
+  slider.setAttribute('aria-label', motor.name + ' speed percent');
+
+  const buttons = {};
+  const bar = document.createElement('div');
+  bar.className = 'motor-buttons';
+  [['reverse', '◀ reverse'], ['stop', '■ stop'], ['forward', 'forward ▶']].forEach(pair => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = pair[0] === 'stop' ? 'stop' : pair[0];
+    b.textContent = pair[1];
+    // Always send the knob's current value, so stopping keeps the speed the
+    // user chose and turning it back on resumes from there.
+    b.addEventListener('click', () => {
+      sendMotor(motor.id, pair[0], Number(slider.value));
+    });
+    buttons[pair[0]] = b;
+    bar.appendChild(b);
+  });
+
+  const ui = { slider: slider, readout: num, buttons: buttons, speed: 70, direction: 'stopped' };
+  motorUI[motor.id] = ui;
+
+  // Same as the servos: only move the label while dragging, and send once on
+  // release so one drag is one request.
+  slider.addEventListener('input', () => {
+    num.textContent = slider.value;
+  });
+  slider.addEventListener('change', () => {
+    // Nudge the motor with the new speed, keeping whatever direction it had.
+    const dir = ui.direction === 'forward' ? 'forward'
+      : (ui.direction === 'reverse' ? 'reverse' : 'stop');
+    sendMotor(motor.id, dir, Number(slider.value));
+  });
+
+  box.appendChild(head);
+  box.appendChild(slider);
+  box.appendChild(bar);
+  motorsBox.appendChild(box);
+}
+
+async function sendServo(pin, angle, word) {
+  const ui = servoUI[pin];
+  setBusy(true);
+  say('Sending...');
+  try {
+    const state = await post('/api/servo/' + pin, String(angle));
+    applyState(state);
+    const name = servoNameFor(pin);
+    const now = state.servos[pin];
+    const where = servoWordFor(pin, now);
+    const done = where ? where : 'at ' + now + '°';
+    say(name + ' is ' + done);
+    logManual('set_servo', { name: name, angle: now },
+      'Success: ' + name + ' (GPIO' + pin + ') is now ' + done + '.');
+  } catch (err) {
+    say(err.message, true);
+    logManual('set_servo', { name: servoNameFor(pin), angle: angle }, null, err.message);
+    // Put the knob back where the ESP32 actually is.
+    if (ui && ui.angle !== undefined) paintServo(pin, ui.angle);
+  } finally {
+    setBusy(false);
+  }
+}
+
+LEDS.forEach(buildRow);
+
+// Sends a new open/close pair for one servo. The board keeps it, so the doors
+// and windows stay right across a power cut and the voice assistant uses the
+// same angles.
+async function saveServoTravel(pin) {
+  const ui = servoUI[pin];
+  if (!ui || !ui.openInput) return;
+  const open = ui.openInput.value.trim();
+  const close = ui.closeInput.value.trim();
+  const pair = [open, close].map(Number);
+  const bad = pair.some(n => !Number.isInteger(n) || n < 0 || n > 180);
+  if (bad) {
+    say('Both angles must be whole numbers from 0 to 180', true);
+    return;
+  }
+  if (open === close) {
+    say('Open and close cannot be the same angle', true);
+    return;
+  }
+
+  setBusy(true);
+  say('Saving...');
+  try {
+    const state = await post('/api/servo/' + pin + '/range', open + ' ' + close);
+    const saved = (state.servoTravel || {})[pin];
+    if (!saved || Number(saved.open) !== Number(open) || Number(saved.close) !== Number(close)) {
+      const err = new Error('ESP32 did not confirm the new angles. Update its firmware and try again.');
+      err.status = 409;
+      throw err;
+    }
+    applyState(state);
+    say(servoNameFor(pin) + ': open ' + saved.open + '°, close ' + saved.close + '°');
+    logManual('set_servo_range',
+      { name: servoNameFor(pin), open: saved.open, close: saved.close },
+      'Success: ' + servoNameFor(pin) + ' now opens at ' + saved.open
+      + '° and closes at ' + saved.close + '°.');
+  } catch (err) {
+    // Leave the typed numbers in the boxes: they are what the user wants to
+    // keep, and wiping them is what makes a failed save look like a lost edit.
+    if (err.status === 404 || err.status === 409) {
+      say('Angles were not confirmed by the ESP32. Flash current firmware '
+        + '(ESP32: python3 generate.py --upload), then try again.', true);
+    } else {
+      say('Not saved: ' + err.message, true);
+    }
+    logManual('set_servo_range', { name: servoNameFor(pin), open: open, close: close },
+      null, err.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+if (SERVOS.length) {
+  const title = document.createElement('h2');
+  title.className = 'servos-title';
+  title.textContent = 'Servos';
+  servosBox.appendChild(title);
+  SERVOS.forEach(buildServo);
+
+  const note = document.createElement('p');
+  note.className = 'servo-note';
+  // Only mention the knob if one of them still has one.
+  const hasKnob = SERVOS.some(s => s.open === null);
+  const hasRange = SERVOS.some(s => s.open !== null);
+  note.textContent = (hasKnob ? 'Drag a knob and release to send the new angle. ' : '')
+    + (hasRange ? 'The angles in the boxes are saved on the ESP32. ' : '')
+    + 'Servos are powered from an external 5V supply, not the ESP32.';
+  servosBox.appendChild(note);
+}
+
+if (MOTORS.length) {
+  const title = document.createElement('h2');
+  title.className = 'servos-title';
+  title.textContent = 'Motors';
+  motorsBox.appendChild(title);
+  MOTORS.forEach(buildMotor);
+
+  const note = document.createElement('p');
+  note.className = 'servo-note';
+  note.textContent = 'Set a speed, then pick a direction. Stopping keeps the speed '
+    + 'you chose. The L298N needs its ENA jumper removed to receive the PWM.';
+  motorsBox.appendChild(note);
+} else {
+  servosBox.remove();
+}
+
+// Browsers only allow the microphone on a secure page: https, or localhost.
+// Opened straight from the ESP32's own http:// address the mic stays blocked,
+// so point people at the bridge, which serves the same page on localhost.
+const needsLocalhost = location.protocol === 'http:'
+  && !['localhost', '127.0.0.1'].includes(location.hostname);
+
+function updateBridgeNote(message) {
+  // The localhost advice is the more useful one, so it wins.
+  bridgeNote.textContent = needsLocalhost
+    ? 'For voice, open this page at http://localhost:8765 instead.'
+    : message;
+}
+
+fetch(API + '/api/state')
+  .then(r => r.ok ? r.json() : Promise.reject(new Error('no reply from ESP32')))
+  .then(state => { applyState(state); say('Ready'); })
+  .catch(err => say(err.message, true));
+
+allOnBtn.addEventListener('click', () => sendAll(true));
+allOffBtn.addEventListener('click', () => sendAll(false));
+
+// --- voice assistant -----------------------------------------------------
+// Speech recognition and speech output are both built into the browser, so
+// they are free and need no API key. The language model lives in the local
+// bridge, which holds the OpenRouter key so it never reaches this page.
+
+// If this page was served by the bridge on localhost, talk to the bridge on
+// the same origin. If the ESP32 served it, point at the bridge directly.
+const BRIDGE = location.origin;
+
+// --- tool call log -------------------------------------------------------
+// The bridge reports which tools the model chose and what came back, so you
+// can see exactly how a spoken sentence became a GPIO change. It is kept in
+// the page only, and saved to this browser's storage so it survives a reload.
+
+const logBox = document.getElementById('log-box');
+const logEl = document.getElementById('log');
+const logClearBtn = document.getElementById('log-clear');
+const LOG_KEY = 'smarthouse.toollog';
+const LOG_MAX = 60;
+
+// Entries are stored as objects. Storing the dataset string instead would
+// write an array of JSON strings, and reading that back gives strings with no
+// fields, which is what produced "Invalid Date" in the log.
+function loadLog() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LOG_KEY) || '[]');
+    if (!Array.isArray(saved)) return;
+    saved.slice(-LOG_MAX).forEach(item => {
+      // Tolerate the old string-shaped entries rather than showing garbage.
+      let entry = item;
+      if (typeof entry === 'string') {
+        try { entry = JSON.parse(entry); } catch (err) { return; }
+      }
+      if (entry && typeof entry === 'object' && entry.at) appendTurn(entry);
+    });
+  } catch (err) { /* storage blocked or corrupt, start empty */ }
+}
+
+function saveLog() {
+  try {
+    const turns = Array.from(logEl.children).slice(-LOG_MAX)
+      .map(node => {
+        try { return JSON.parse(node.dataset.entry); } catch (err) { return null; }
+      })
+      .filter(entry => entry && entry.at);
+    localStorage.setItem(LOG_KEY, JSON.stringify(turns));
+  } catch (err) { /* not fatal, the log just will not persist */ }
+}
+
+function shortArgs(args) {
+  if (!args || !Object.keys(args).length) return '';
+  return Object.entries(args)
+    .map(([k, v]) => k + '="' + v + '"')
+    .join(' ');
+}
+
+function appendTurn(entry) {
+  const turn = document.createElement('div');
+  turn.className = 'log-turn';
+  if (entry.error) turn.classList.add('err');
+  turn.dataset.entry = JSON.stringify(entry);
+
+  const you = document.createElement('div');
+  you.className = 'log-you';
+  // Guard the date: a bad or missing timestamp must not print "Invalid Date".
+  const when = new Date(entry.at);
+  const time = isNaN(when.getTime()) ? '' : when.toLocaleTimeString();
+  const how = entry.mode === 'voice' ? 'said'
+    : entry.mode === 'button' ? 'button'
+    : 'typed';
+  const head = '<b>' + how + '</b>'
+    + (time ? ' ' + escapeHtml(time) : '')
+    + ' &middot; ';
+  you.innerHTML = head + escapeHtml(entry.message || '(no message)');
+  turn.appendChild(you);
+
+  const calls = entry.actions || [];
+  if (!calls.length) {
+    const none = document.createElement('div');
+    none.className = 'log-none';
+    none.textContent = entry.error
+      ? 'failed: ' + entry.error
+      : 'no tool called, the model just replied';
+    turn.appendChild(none);
+  } else {
+    calls.forEach(call => {
+      const bad = String(call.result || '').startsWith('Error');
+      const line = document.createElement('div');
+      line.className = 'log-call' + (bad ? ' bad' : '');
+      line.innerHTML = '<span class="fn">' + escapeHtml(call.tool) + '</span>'
+        + ' <span class="arg">' + escapeHtml(shortArgs(call.args)) + '</span>'
+        + '<br>&rarr; <span class="res">' + escapeHtml(call.result) + '</span>';
+      turn.appendChild(line);
+    });
+  }
+
+  if (entry.model) {
+    const model = document.createElement('div');
+    model.className = 'log-model';
+    model.textContent = entry.model;
+    turn.appendChild(model);
+  }
+
+  logEl.appendChild(turn);
+  while (logEl.children.length > LOG_MAX) logEl.removeChild(logEl.firstChild);
+  logEl.scrollTop = logEl.scrollHeight;
+  saveLog();
+}
+
+function logTurn(entry) {
+  appendTurn(entry);
+  logBox.open = true;   // so a new call is visible without a click
+}
+
+// Record a change made with the on-page buttons, so the log shows every
+// action whether it came from the assistant or from a click.
+function logManual(tool, args, result, error) {
+  if (typeof logTurn !== 'function') return;   // log not ready, skip
+  logTurn({
+    at: Date.now(),
+    mode: 'button',
+    message: tool === 'set_all_leds'
+      ? 'clicked All ' + (args.state === 'on' ? 'on' : 'off')
+      : 'clicked ' + args.name,
+    actions: [{ tool: tool, args: args, result: result || ('Error: ' + error) }],
+    model: null,
+    error: error || null
+  });
+}
+
+function escapeHtml(text) {
+  return String(text == null ? '' : text)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+logClearBtn.addEventListener('click', event => {
+  event.preventDefault();
+  event.stopPropagation();
+  logEl.textContent = '';
+  try { localStorage.removeItem(LOG_KEY); } catch (err) { /* ignore */ }
+});
+
+loadLog();
+
+const micBtn = document.getElementById('mic');
+const micLabel = document.getElementById('mic-label');
+const heardEl = document.getElementById('heard');
+const replyEl = document.getElementById('reply');
+const bridgeNote = document.getElementById('bridge-note');
+const typedEl = document.getElementById('typed');
+const sendTypedBtn = document.getElementById('send-typed');
+
+const history = [];
+let voiceBusy = false;
+let listening = false;
+
+function speak(text) {
+  if (!('speechSynthesis' in window) || !text) return;
+  window.speechSynthesis.cancel();
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.rate = 1.02;
+  utter.pitch = 1;
+  window.speechSynthesis.speak(utter);
+}
+
+async function ask(text, mode) {
+  if (!text || voiceBusy) return;
+  voiceBusy = true;
+  micBtn.disabled = true;
+  sendTypedBtn.disabled = true;
+  heardEl.textContent = '\u201c' + text + '\u201d';
+  replyEl.textContent = 'Thinking...';
+
+  const entry = {
+    at: Date.now(),
+    mode: mode || 'typed',
+    message: text,
+    actions: [],
+    model: null,
+    error: null
+  };
+
+  try {
+    const res = await fetch(BRIDGE + '/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // Four exchanges of context, so "apagala" still works. Note the
+      // history is plain text with no tool calls in it: models that are weak
+      // at tool calling learn from it to reply in words instead of acting.
+      // openai/gpt-4.1-mini handles this fine, smaller models do not.
+      body: JSON.stringify({ message: text, history: history.slice(-8) })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || ('bridge replied ' + res.status));
+
+    history.push({ role: 'user', content: text });
+    history.push({ role: 'assistant', content: data.reply || '' });
+    while (history.length > 6) history.shift();   // do not grow without bound
+
+    entry.actions = data.actions || [];
+    entry.model = data.model || null;
+
+    replyEl.textContent = data.reply || '';
+    speak(data.reply);
+
+    // The bridge acted on the LEDs, so pull the real state back from the
+    // ESP32 rather than assuming what happened.
+    if (entry.actions.length) {
+      const state = await fetch(API + '/api/state').then(r => r.json());
+      applyState(state);
+    }
+  } catch (err) {
+    entry.error = err.message;
+    replyEl.textContent = '';
+    say(err.message, true);
+  } finally {
+    logTurn(entry);
+    voiceBusy = false;
+    micBtn.disabled = false;
+    sendTypedBtn.disabled = false;
+    if (!listening) setMicIdle();
+  }
+}
+
+function setMicIdle() {
+  micBtn.classList.remove('listening');
+  micLabel.textContent = 'Talk to the assistant';
+}
+
+// Web Speech API: free, built in, but only in Chrome and Edge.
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null;
+
+if (SpeechRecognition) {
+  recognition = new SpeechRecognition();
+  recognition.lang = 'en-US';
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+  recognition.continuous = false;
+
+  recognition.onstart = () => {
+    listening = true;
+    micBtn.classList.add('listening');
+    micLabel.textContent = 'Listening...';
+  };
+
+  recognition.onresult = event => {
+    const said = event.results[0][0].transcript;
+    window.speechSynthesis.cancel();   // stop any reply already playing
+    ask(said, 'voice');
+  };
+
+  recognition.onerror = event => {
+    if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+      // On an insecure page Chrome reports this as a blocked microphone, when
+      // the real fix is simply to use the localhost copy of the page.
+      updateBridgeNote(needsLocalhost
+        ? 'The microphone is blocked on this address. Open http://localhost:8765 for voice.'
+        : 'Microphone blocked. Allow microphone access for this page, then try again.');
+    } else if (event.error === 'network') {
+      updateBridgeNote('Speech recognition needs internet access and did not respond.');
+    } else if (event.error !== 'aborted' && event.error !== 'no-speech') {
+      updateBridgeNote('Speech recognition error: ' + event.error);
+    }
+    setMicIdle();
+  };
+
+  recognition.onend = () => {
+    listening = false;
+    setMicIdle();
+  };
+
+  micBtn.addEventListener('click', () => {
+    if (listening) {
+      recognition.stop();
+      return;
+    }
+    bridgeNote.textContent = '';
+    try {
+      recognition.start();
+    } catch (err) {
+      updateBridgeNote('Could not start the microphone: ' + err.message);
+    }
+  });
+} else {
+  micBtn.disabled = true;
+  micLabel.textContent = 'Voice needs Chrome or Edge';
+  updateBridgeNote(
+    'This browser has no speech recognition. Use the text box below, or open the page in Chrome or Edge.');
+}
+
+sendTypedBtn.addEventListener('click', () => {
+  const text = typedEl.value.trim();
+  if (!text) return;
+  typedEl.value = '';
+  ask(text, 'typed');
+});
+
+typedEl.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendTypedBtn.click();
+  }
+});
+
+// Tell the user straight away if the bridge is not running.
+fetch(BRIDGE + '/api/health')
+  .then(r => r.json())
+  .then(info => {
+    if (!info.key_configured) {
+      updateBridgeNote('The bridge has no API key. Check ESP32/bridge/.env');
+    } else if (!info.esp32_reachable) {
+      updateBridgeNote('The bridge cannot reach the ESP32 yet.');
+    } else {
+      updateBridgeNote('Assistant ready - ' + info.model);
+    }
+  })
+  .catch(() => {
+    updateBridgeNote('Assistant offline. Run: python3 ESP32/bridge/server.py');
+  });
+</script>
+</body>
+</html>
