@@ -212,6 +212,15 @@ def configure_wifi():
         return jsonify({"error": str(exc)}), 503
 
 
+@app.get("/admin/wifi/networks")
+@admin_required
+def wifi_networks():
+    try:
+        return jsonify(core.esp32_get("/api/wifi/networks"))
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 503
+
+
 def relay(method, path, body=""):
     """Queue an ESP32 request for the authenticated home connector."""
     job_id = secrets.token_urlsafe(18)
