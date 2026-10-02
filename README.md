@@ -45,12 +45,12 @@ worker; the home connector token is required for its private command channel.
 
 ## ESP32 Wi-Fi
 
-The owner console has a Wi-Fi form. It sends credentials over the paired home
-connector and the ESP32 stores them in its Preferences memory, then reconnects.
-It does not save the Wi-Fi password in the website database. If the ESP32
-cannot join a network, current firmware starts the `SmartHouse-Setup` access
-point. Connect locally and open `http://192.168.4.1/wifi` to enter valid
-credentials. Wi-Fi should be 2.4 GHz.
+The owner console scans for nearby Wi-Fi networks and marks each network as
+open or password protected. Select a network and enter its password if needed.
+Credentials travel over the paired home connector; the website does not save
+the Wi-Fi password. If the ESP32 cannot join a network, firmware starts the
+`SmartHouse-Setup` access point. Connect locally and open
+`http://192.168.4.1/wifi` to scan and enter credentials. Wi-Fi should be 2.4 GHz.
 
 Flash the current firmware from the project before using Wi-Fi setup:
 
