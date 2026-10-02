@@ -1,0 +1,3 @@
+Flask>=3.0,<4
+flask-cors>=4,<6
+gunicorn>=22,<24
