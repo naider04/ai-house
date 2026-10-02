@@ -328,7 +328,8 @@ def build_tools():
         {"type": "function", "function": {
             "name": "turn_on_one_light",
             "description": (
-                "Turn on exactly one requested light and turn off every other light. "
+                "Turn on one requested light. If it is a configured color light, "
+                "turn off the other configured color lights; leave non-color lights alone. "
                 f"Available names: {', '.join(led_names)}."
             ),
             "parameters": {"type": "object", "properties": {
@@ -337,8 +338,9 @@ def build_tools():
         {"type": "function", "function": {
             "name": "turn_on_multiple_lights",
             "description": (
-                "Turn on the requested combination of lights and turn off every "
-                "other light. Use only when the user explicitly requests multiple "
+                "Turn on the requested lights. If color lights are selected, turn off "
+                "other configured color lights while leaving non-color lights alone. "
+                "Use only when the user explicitly requests multiple "
                 f"lights/colors, or all lights. Available names: {', '.join(led_names)}."
             ),
             "parameters": {"type": "object", "properties": {
@@ -477,10 +479,11 @@ def run_tool(name, args):
                 if led not in chosen:
                     chosen.append(led)
             if state_arg == "on":
-                chosen_pins = {led["pin"] for led in chosen}
-                for led in available:
-                    if led["pin"] not in chosen_pins:
-                        esp32_post(f"/api/led/{led['pin']}", "off")
+                chosen_color_pins = {led["pin"] for led in chosen if led.get("color")}
+                if chosen_color_pins:
+                    for led in available:
+                        if led.get("color") and led["pin"] not in chosen_color_pins:
+                            esp32_post(f"/api/led/{led['pin']}", "off")
             for led in chosen:
                 esp32_post(f"/api/led/{led['pin']}", state_arg)
             return f"Success: {', '.join(led['name'] for led in chosen)} {state_arg}."
