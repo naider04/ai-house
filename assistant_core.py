@@ -43,10 +43,15 @@ HERE = Path(__file__).resolve().parent
 ENV_FILE = HERE / ".env"
 
 # Same shape generate.py reads, so both sides agree on the servo names.
+# The trailing keyword marks a servo that rocks rather than opens, so it keeps
+# its two angles but is never offered as something to open or close.
 SERVO_RE = re.compile(
     r"^([A-Za-z0-9 _-]+?)\s*:\s*(?:gpio)?\s*(\d+)\s*"
-    r"(?:,\s*open\s+(-?\d+)\s*,\s*close\s+(-?\d+)\s*)?$",
+    r"(?:,\s*open\s+(-?\d+)\s*,\s*close\s+(-?\d+)\s*)?"
+    r"(?:,\s*([a-z]+)\s*)?$",
     re.I)
+
+ROCKER = "rocker"
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -206,8 +211,10 @@ def read_servos():
     """Return the servo list straight out of servos.txt, so the tools always
     match the firmware instead of drifting out of sync.
 
-    A line is 'name: gpio N' with an optional ', open A, close B'. The pair is
-    what makes a servo a plain open/close mechanism like a door or a window.
+    A line is 'name: gpio N' with an optional ', open A, close B' and an
+    optional ', rocker' after it. The pair is what makes a servo a plain
+    open/close mechanism like a door or a window; 'rocker' says the pair is
+    rocking limits instead, so it is not an opening.
     """
     cfg = HERE / "servos.txt"
     if not cfg.exists():
@@ -222,8 +229,18 @@ def read_servos():
                 "pin": int(m.group(2)),
                 "open": int(m.group(3)) if m.group(3) is not None else None,
                 "close": int(m.group(4)) if m.group(4) is not None else None,
+                "rocker": (m.group(5) or "").lower() == ROCKER,
             })
     return servos
+
+
+def is_opening(servo):
+    """True when the servo is a mechanism that opens and closes.
+
+    A rocker is not. Its two angles are the limits of a rocking motion, so it
+    must never be offered to the assistant as something to open or close.
+    """
+    return not servo.get("rocker")
 
 
 def servo_travel_from_board():
@@ -278,7 +295,7 @@ def build_tools():
     servos = read_servos()
     global LAST_TRAVEL
     LAST_TRAVEL = servo_travel_from_board()
-    openings = [s for s in servos if effective_pair(s, LAST_TRAVEL)]
+    openings = [s for s in servos if is_opening(s) and effective_pair(s, LAST_TRAVEL)]
     led_names = [l["name"] for l in leds]
     opening_names = [s["name"] for s in openings]
 
@@ -418,7 +435,7 @@ def run_tool(name, args):
             descriptions = []
             for servo in read_servos():
                 pair = effective_pair(servo, live)
-                if not pair:
+                if not pair or not is_opening(servo):
                     continue
                 position = positions.get(str(servo["pin"]))
                 status = "open" if position == pair[0] else (
@@ -431,10 +448,10 @@ def run_tool(name, args):
             state_arg = str(args.get("state", "")).strip().lower()
             if state_arg not in ("open", "closed"):
                 return "Error: state must be open or closed."
-            match = next((s for s in read_servos()
-                          if s["name"].lower() == wanted and effective_pair(s)), None)
+            known = [s for s in read_servos() if is_opening(s) and effective_pair(s)]
+            match = next((s for s in known if s["name"].lower() == wanted), None)
             if not match:
-                names = ", ".join(s["name"] for s in read_servos() if effective_pair(s)) or "none"
+                names = ", ".join(s["name"] for s in known) or "none"
                 return f"Error: unknown opening. Available openings: {names}."
             pair = effective_pair(match)
             angle = int(pair[0] if state_arg == "open" else pair[1])
