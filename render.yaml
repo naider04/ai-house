@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: ai-house
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --workers 1 --threads 16 --timeout 120
+    disk:
+      name: ai-house-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.4
+      - key: DATABASE_PATH
+        value: /var/data/ai-house.sqlite3
+      - key: SECRET_KEY
+        generateValue: true
+      - key: AGENT_TOKEN
+        generateValue: true
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: OPENROUTER_MODEL
+        value: openai/gpt-4.1-mini
